@@ -1,20 +1,42 @@
 import random
 from collections import deque
 
-# Given a group G, construct a random generating sequence. This is likely to be shorter than a generating sequence
-# found in some other way, and hence more efficient for constructing Cayley graphs.
-
 def random_generating_sequence(G):
+    """
+    Construct a random sequence of generators of a finite group.
+    
+    This is likely to be quite short, and hence efficient for constructing Cayley graphs.
+    
+    EXAMPLES::
+    
+        sage: G = SymmetricGroup(10)
+        sage: l = random_generating_sequence(G)
+        sage: G.subgroup(l).order() # Should equal the order of G
+        3628800
+    """
+    if not G.is_finite():
+        return ValueError("Group must be finite")
     l = []
     n = G.order()
     while G.subgroup(l).order() != n:
         l.append(G.random_element())
     return l
     
-# Given a subspace of $F^n$ represented by an $m \times n$ matrix, compute the subgroup of $GL(n,F)$ stabilizing 
-# this subspace for the *right* action. For a left action, set `transpose` to True.
-
 def vec_stab(M, transpose=False):
+    """
+    Compute the stabilizer of a subspace of a vector space.
+    
+    INPUT:
+    
+     - ``M`` -- a matrix over a field
+     
+     - ``transpose`` -- a boolean (default `False`)
+     
+    OUTPUT: 
+    
+    The subgroup of `GL(n,F)`` stabilizing the subspace defined by the rows of `M` 
+    for the right action (if ``transpose`` is `False`) or the left action (otherwise).
+    """
     F = M.base_ring()
     m,n = M.dimensions()
     # Conjugate to a standard matrix.
@@ -35,12 +57,13 @@ def vec_stab(M, transpose=False):
         assert all((M*g.matrix()).echelon_form() == M.echelon_form() for g in G.gens())
     return G
 
-# Complete the construction of a group retract from a generalized Cayley digraph.
-# In most instances this is a rate-limiting step.
-# Set forward_only=True if it is known that every weakly connected component is strongly connected.
-
-def retract_from_graph(G, Gamma, reps, forward_only=False):
-    iden = G(1)
+def retract_from_graph(iden, Gamma, reps, forward_only=False):
+    """
+    Compute a group retract from a generalized Cayley digraph.
+    
+    Set ``forward_only`` to `True` only if it is known that every weakly connected component
+    is strongly connected (e.g., for a true Cayley digraph).
+    """
     l = [(M, (M, iden)) for M in reps]
     d = dict(l)
     queue = deque(l)
@@ -64,69 +87,110 @@ def retract_from_graph(G, Gamma, reps, forward_only=False):
 # listed in `exclude` or any vertices for which `forbid` returns True, and a dictionary 
 # identifying group elements carrying representatives to arbitrary vertices in their components.
 
-def group_retract(G, vertices, edges, exclude=[], forbid=None, forward_only=False):
-    vertices = list(vertices)
-    # Add dummy edges to link all excluded vertices.
-    edges2 = [(exclude[0], exclude[i]) for i in range(1, len(exclude))]
-    # Construct the digraph.
-    Gamma = DiGraph([vertices, edges + edges2], loops=True, format='vertices_and_edges')
-    # Check that we did not implicitly add any vertices.
-    assert set(Gamma.vertices(sort=False)) == set(vertices)
-    # Remove all vertices connected to an excluded vertex.
-    if exclude:
-        forbidden_verts = Gamma.connected_component_containing_vertex(exclude[0], sort=False)
-        Gamma.delete_vertices(forbidden_verts)
-    else:
-        forbidden_verts = []
-    # Compute connected components.
-    conn = Gamma.connected_components(sort=False)
-    # Remove all components containing a forbidden vertex.
-    reps = []
-    for l in conn:
-        i = l[0]
-        if forbid and forbid(i):
-            forbidden_verts += l
+class GroupRetract():
+    """
+    Group retract object associated to a group action and a generalized Cayley digraph.
+    
+    The underlying dict is stored as the attribute ``d``, but one can also index directly.
+    """
+    def __init__(self, G, vertices, edges, exclude=[], forbid=None, forward_only=False, optimized_rep=None):
+        self.G = G
+        vertices = list(vertices)
+        self.optimized_rep = optimized_rep if optimized_rep else (lambda g: g)
+        # Early abort if there are no edges and nothing to exclude (e.g., a Cayley digraph for the trivial group).
+        if not edges and not exclude and not forbid:
+           iden = optimized_rep(G(1)) if optimized_rep else G(1)
+           self.d = {v: (v, iden) for v in vertices}
+           self.forbidden_verts = set()
+           return None
+        # Add dummy edges to link all excluded vertices.
+        edges2 = [(exclude[0], exclude[i]) for i in range(1, len(exclude))]
+        # Construct the digraph.
+        Gamma = DiGraph([vertices, edges + edges2], loops=True, format='vertices_and_edges')
+        # Check that we did not implicitly add any vertices.
+        assert set(Gamma.vertices(sort=False)) == set(vertices)
+        # Remove all vertices connected to an excluded vertex.
+        if exclude:
+            forbidden_verts = Gamma.connected_component_containing_vertex(exclude[0], sort=False)
+            Gamma.delete_vertices(forbidden_verts)
         else:
-            reps.append(i)
-    forbidden_verts = set(forbidden_verts)
-    # Compute the retract on the remaining components.
-    d = retract_from_graph(G, Gamma, reps, forward_only)
-    # Check that we are not missing any vertices.
-    assert all(M in d or M in forbidden_verts for M in vertices)
-    # Return the results.
-    return reps, d, forbidden_verts
+            forbidden_verts = []
+        # Compute connected components.
+        conn = Gamma.connected_components(sort=False)
+        # Remove all components containing a forbidden vertex.
+        reps = []
+        for l in conn:
+            i = l[0]
+            if forbid and forbid(i):
+                forbidden_verts += l
+            else:
+                reps.append(i)
+        # Compute the retract on the remaining components.
+        iden = self.optimized_rep(G(1))
+        d = retract_from_graph(iden, Gamma, reps, forward_only)
+        # Check that we are not missing any vertices.
+        forbidden_verts = set(forbidden_verts)
+        assert all(M in d or M in forbidden_verts for M in vertices)
+        self.d = d
+        
+    def __getitem__(self, key):
+        return self.d[key]
+        
+    def __iter__(self):
+        return self.d.__iter__()
+        
+    def __contains__(self, item):
+        return (item in self.d)
+        
+    def vertices(self):
+        return self.d.keys()
 
-# Given a group retract for a Cayley graph for the (left) action of a group G on a set, 
-# compute generators of the stabilizer of an element v.
-
-def stabilizer_from_group_retract(G, d, v, apply_group_elem, optimized_rep, verbose=False):
-    gens0 = [optimized_rep(g) for g in random_generating_sequence(G)]
-    if verbose:
-        print("Stabilizer number of generators: {}".format(len(gens0)))
-    mats0, g0 = d[v]
-    S = list(d.keys())
-    # Use the orbit-stabilizer formula to compute the stabilizer order.
-    orbit_len = sum(1 for e0 in S if e0 in d and d[e0][0] == mats0)
-    target_order = ZZ(G.order() / orbit_len)
-    if verbose:
-        print("Stabilizer order: {}".format(target_order))
-    # Produce random stabilizer elements until we hit the right order.
-    gens = []
-    while target_order > 1:
-        e1 = random.choice(S)
-        mats1, g1 = d[e1]
-        if mats1 != mats0:
-            continue
-        rgen = random.choice(gens0)
-        e2 = apply_group_elem(rgen, e1)
-        mats2, g2 = d[e2]
-        assert mats2 == mats0
-        g = rgen*g1
-        if g != g2:
-            gens.append(g0*~g2*g*~g0)
-            if G.subgroup(gens).order() == target_order:
-                 break
-    return gens
+class CayleyGroupRetract(GroupRetract):
+    """
+    Specialized version of GroupRetract for Cayley digraphs.
+    """
+    def __init__(self, G, vertices, apply_group_elem, optimized_rep=None):
+        self.optimized_rep = optimized_rep if optimized_rep else (lambda g: g)
+        gens = [self.optimized_rep(g) for g in random_generating_sequence(G)]
+        self.gens = gens
+        vertex_set = set(vertices)
+        self.apply_group_elem = apply_group_elem
+        assert all(apply_group_elem(g, v) in vertex_set for g in gens for v in vertex_set)
+        edges = [(M, apply_group_elem(g, M), g) for g in gens for M in vertices]
+        GroupRetract.__init__(self, G, vertices, edges, forward_only=True, optimized_rep=optimized_rep)
+        
+    def stabilizer_gens(self, v):
+        """
+        Compute generators of a point stabilizer.
+        """
+        mats0, g0 = self[v]
+        vertices = tuple(self.vertices())
+        # Use the orbit-stabilizer formula to compute the stabilizer order.
+        orbit_len = sum(1 for e0 in self if e0 in self and self[e0][0] == mats0)
+        target_order = ZZ(self.G.order() / orbit_len)
+        # Produce random stabilizer elements until we hit the right order.
+        gens = []
+        while target_order > 1:
+            e1 = random.choice(vertices)
+            mats1, g1 = self[e1]
+            if mats1 != mats0:
+                continue
+            rgen = random.choice(self.gens)
+            e2 = self.apply_group_elem(rgen, e1)
+            mats2, g2 = self[e2]
+            assert mats2 == mats0
+            g = rgen*g1
+            if g != g2:
+                gens.append(g0*~g2*g*~g0)
+                if self.G.subgroup(gens).order() == target_order:
+                     break
+        return gens
+        
+    def stabilizer(self, v):
+        """
+        Compute a point stabilizer.
+        """
+        return self.G.subgroup(self.stabilizer_gens(v))
 
 # The data structure for orbit lookup trees of depth $n$:
 # - The tree is a dictionary `tree` indexed by levels $0, \dots, n$.
@@ -207,36 +271,21 @@ def extend_orbit_tree(G, S, tree, methods, verbose=True, terminate=False):
                     G0 = G0.intersection(stabilizer(endgen))
                     gens = list(G0.gens())
                 else:
-                    d = tree[n-1][parent]['retract']
-                    gens = stabilizer_from_group_retract(G0, d, endgen, apply_group_elem, optimized_rep, verbose)
-            if verbose:
-                print("Stabilizer generators found: {}".format(len(gens)))
+                    retract = tree[n-1][parent]['retract']
+                    gens = retract.stabilizer_gens(endgen)
             G1 = G.subgroup(gens + tree[n][mats]['stab'])
             tree[n][mats]['stab'] = G1
-
             if verbose:
-                print("Stabilizer computed")
+                print("Stabilizer order: {}".format(G1.order()))
             vertices = [M for M in S if M not in mats]
-            if G1.order() == 1: # Early abort
-                if verbose:
-                    print("Trivial stabilizer")
-                tmp = vertices
-                iden = optimized_rep(G(1))
-                d = {M: (M, iden) for M in vertices}
-            else: # Construct the group retract under this green node.
-                gens = [optimized_rep(g) for g in random_generating_sequence(G1)]
-                assert all(apply_group_elem(g, M) in mats for g in gens for M in mats)
-                if verbose:
-                    print("Number of generators: {}".format(len(gens)))
-                G1 = G.subgroup(gens)
-                edges = [(M, apply_group_elem(g, M), g) for M in vertices for g in gens]
-                if verbose:
-                    print("Edges computed")
-                tmp, d, _ = group_retract(G, vertices, edges, forward_only=True)
-                if verbose:
-                    print("Retract computed")
-            tree[n][mats]['retract'] = d
-            for M in tmp:
+            # Construct the Cayley group retract under this green node.
+            retract = CayleyGroupRetract(G1, vertices, apply_group_elem, optimized_rep)
+            tree[n][mats]['retract'] = retract
+            if verbose:
+                print("Retract computed")
+            for M in retract:
+                if retract[M][0] != M: # Not an orbit representative
+                    continue
                 if M in mats:
                     raise ValueError("Found repeated entry in tuple")
                 mats1 = mats + (M,)
@@ -265,14 +314,15 @@ def extend_orbit_tree(G, S, tree, methods, verbose=True, terminate=False):
                     edges.append((mats1, mats, g1))
     if verbose:
         print("Edges computed")
-    tmp, d, forbidden_verts = group_retract(G, tree[n+1].keys(), edges, exclude, forbid)
+    retract = GroupRetract(G, tree[n+1].keys(), edges, exclude, forbid)
     if verbose:
         print("Retract computed")
-    for mats in d:
-        tree[n+1][mats]['gpel'] = d[mats]
-    # Mark green nodes.
-    for mats in tmp:
-        tree[n+1][mats]['stab'] = []
+    # Mark nodes as green or red, and record group elements.
+    for mats in retract:
+        t = retract[mats]
+        tree[n+1][mats]['gpel'] = t
+        if t[0] == mats:
+            tree[n+1][mats]['stab'] = []
     assert all('stab' in tree[n+1][tree[n+1][mats]['gpel'][0]] 
                    for mats in tree[n+1] if 'gpel' in tree[n+1][mats])
 
@@ -281,11 +331,10 @@ def extend_orbit_tree(G, S, tree, methods, verbose=True, terminate=False):
         if verbose:
             print("Stabilizer generators not computed")
     else:
-        iden = optimized_rep(G(1))
         for e in edges:
-            if e[0] not in forbidden_verts:
-                mats1, g1 = d[e[0]]
-                mats2, g2 = d[e[1]]
+            if e[0] in retract:
+                mats1, g1 = retract[e[0]]
+                mats2, g2 = retract[e[1]]
                 assert mats1 == mats2
                 g = e[2]*g1
                 if g != g2:
@@ -300,6 +349,7 @@ def extend_orbit_tree(G, S, tree, methods, verbose=True, terminate=False):
 
 # Build an orbit lookup tree to depth n. By default, we do not record stabilizer generators at depth n,
 # so the result cannot be used to extend to depth n+1; set terminate=False to override this.
+# The semantics of methods are as in extend_orbit_tree.
 
 def build_orbit_tree(G, S, n, methods, verbose=True, terminate=True):    
     # Verify that each generator of G defines a permutation of S.
