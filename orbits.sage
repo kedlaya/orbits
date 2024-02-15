@@ -132,18 +132,23 @@ class GroupRetract():
         forbidden_verts = set(forbidden_verts)
         assert all(M in d or M in forbidden_verts for M in vertices)
         self.d = d
-        
+
     def __getitem__(self, key):
         return self.d[key]
-        
+
     def __iter__(self):
         return self.d.__iter__()
-        
+
     def __contains__(self, item):
         return (item in self.d)
-        
+
     def vertices(self):
         return self.d.keys()
+        
+    def reps(self):
+        for v in self.d.keys():
+            if self[v][0] == v:
+                yield v
 
 class CayleyGroupRetract(GroupRetract):
     """
@@ -158,7 +163,7 @@ class CayleyGroupRetract(GroupRetract):
         assert all(apply_group_elem(g, v) in vertex_set for g in gens for v in vertex_set)
         edges = [(M, apply_group_elem(g, M), g) for g in gens for M in vertices]
         GroupRetract.__init__(self, G, vertices, edges, forward_only=True, optimized_rep=optimized_rep)
-        
+
     def stabilizer_gens(self, v):
         """
         Compute generators of a point stabilizer.
@@ -185,7 +190,7 @@ class CayleyGroupRetract(GroupRetract):
                 if self.G.subgroup(gens).order() == target_order:
                      break
         return gens
-        
+
     def stabilizer(self, v):
         """
         Compute a point stabilizer.
@@ -200,39 +205,171 @@ class CayleyGroupRetract(GroupRetract):
 #  - `stab` (for $U$ green) the stabilizer of $U$.
 #  - `retract` (for $U$ green and $k<n$): a dictionary whose value at $y \in S \setminus U$ (resp $y \in S/U$) is an element $g \in G_U$ such that $U \cup \{g^{-1}(y)\}$ (resp. $\pi_U^{-1}(g^{-1}(y))$) is a red or green node.
 
-# Use an enhanced $n$-orbit tree to identify an orbit representative for the action of the group $G$ on $k$-tuples.
+class OrbitLookupTree():
+    def __init__(self, G, vertices, methods):
+        self.G = G
+        self.vertices = vertices
+        self.apply_group_elem = methods['apply_group_elem']
+        self.stabilizer = methods['stabilizer'] if 'stabilizer' in methods else None
+        self.optimized_rep = methods['optimized_rep'] if 'optimized_rep' in methods else (lambda g: g)
+        self.forbid = methods['forbid'] if 'forbid' in methods else (lambda x, easy=False: False)
+        S0 = tuple()
+        self.tree = {0: {S0: {'gpel': (S0, self.optimized_rep(G(1))), 'stab': []}}}
+        self.scratch = None
 
-def orbit_rep_from_tree(G, tree, mats, apply_group_elem, optimized_rep, find_green=True):
-    n = len(mats)
-    if n not in tree:
-        raise ValueError("Tree not computed to depth {}".format(n))
-    if n == 0:
-        return mats, optimized_rep(G(1))
-    mats0 = mats[:-1]
-    if mats0 in tree[n-1] and 'gpel' not in tree[n-1][mats0]: # Truncation is an ineligible node
-        return None, None
-    elif mats0 in tree[n-1] and 'stab' in tree[n-1][mats0]: # Truncation is a green node
-        assert 'retract' in tree[n-1][mats0]
-        g0 = optimized_rep(G(1))
-        y = mats[-1]
-        assert y not in mats0
-    else: # Truncation needs to be resolved
-        mats0, g0 = orbit_rep_from_tree(G, tree, mats0, apply_group_elem, optimized_rep, find_green=True)
-        if mats0 is None:
+    def __getitem__(self, key):
+        return self.tree[key]
+
+    def __contains__(self, item):
+        return (item in self.tree)
+
+    def depth(self):
+        return max(self.tree.keys())
+
+    def orbit_rep(self, mats, find_green=True):
+        """
+        Find the orbit representative for a given tuple.
+        """
+        n = len(mats)
+        tree = self.tree
+        G = self.G
+        if n not in tree:
+            raise ValueError("Tree not computed to depth {}".format(n))
+        if n == 0:
+            return mats, self.optimized_rep(G(1))
+        mats0 = mats[:-1]
+        if mats0 in tree[n-1] and 'gpel' not in tree[n-1][mats0]: # Truncation is an ineligible node
             return None, None
-        assert 'gpel' in tree[n-1][mats0]
-        assert 'retract' in tree[n-1][mats0]
-        y = apply_group_elem(~g0, mats[-1])
-    z, g1 = tree[n-1][mats0]['retract'][y]
-    assert z not in mats0
-    mats1 = mats0 + (z,)
-    if not find_green:
-        return mats1, g0*g1
-    if 'gpel' not in tree[n][mats1]:
-        return None, None
-    mats2, g2 = tree[n][mats1]['gpel']
-    assert 'gpel' in tree[n][mats2]
-    return mats2, g0*g1*g2
+        elif mats0 in tree[n-1] and 'stab' in tree[n-1][mats0]: # Truncation is a green node
+            assert 'retract' in tree[n-1][mats0]
+            g0 = self.optimized_rep(G(1))
+            y = mats[-1]
+            assert y not in mats0
+        else: # Truncation needs to be resolved
+            mats0, g0 = self.orbit_rep(mats0, find_green=True)
+            if mats0 is None:
+                return None, None
+            assert 'gpel' in tree[n-1][mats0]
+            assert 'retract' in tree[n-1][mats0]
+            y = self.apply_group_elem(~g0, mats[-1])
+        z, g1 = tree[n-1][mats0]['retract'][y]
+        assert z not in mats0
+        mats1 = mats0 + (z,)
+        if not find_green:
+            return mats1, g0*g1
+        if 'gpel' not in tree[n][mats1]:
+            return None, None
+        mats2, g2 = tree[n][mats1]['gpel']
+        assert 'gpel' in tree[n][mats2]
+        return mats2, g0*g1*g2
+
+    def green_nodes(self, n):
+        """
+        Return a list of green nodes at depth n.
+        """
+        return [mats for mats in self[n] if 'stab' in self[n][mats]]
+
+    def nodes_at_new_level(self, verbose=False):
+        n = self.depth()
+        if verbose:
+            print("Current level: {}".format(n))
+        if self.scratch:
+            self.stabilizer_gens(verbose)
+        self.tree[n+1] = {}
+        G = self.G
+        for mats in self[n]:
+            if 'stab' in self[n][mats]: # Green node
+                # Compute the stabilizer of mats (deferred from the previous level).
+                if n == 0:
+                    G0 = G
+                    gens = list(G0.gens())
+                else:
+                    parent = mats[:-1]
+                    endgen = mats[-1]
+                    G0 = self[n-1][parent]['stab']
+                    if G0.order() == 1:
+                        gens = []
+                    elif self.stabilizer is not None:
+                        G0 = G0.intersection(self.stabilizer(endgen))
+                        gens = list(G0.gens())
+                    else:
+                        retract = self[n-1][parent]['retract']
+                        gens = retract.stabilizer_gens(endgen)
+                G1 = G.subgroup(gens + self[n][mats]['stab'])
+                self[n][mats]['stab'] = G1
+                if verbose:
+                    print("Stabilizer order: {}".format(G1.order()))
+                vertices = [M for M in self.vertices if M not in mats]
+                # Construct the Cayley group retract under this green node.
+                retract = CayleyGroupRetract(G1, vertices, self.apply_group_elem, self.optimized_rep)
+                self[n][mats]['retract'] = retract
+                if verbose:
+                    print("Retract computed")
+                for M in retract.reps():
+                    if M in mats:
+                        raise ValueError("Found repeated entry in tuple")
+                    mats1 = mats + (M,)
+                    self[n+1][mats1] = {}
+        # If no forbidden vertices, check the orbit-stabilizer formula.
+        if not self.forbid:
+            N = G.order()
+            if not sum(N // self[n][mats]['stab'].order() for mats in self[n] if 'stab' in self[n][mats]) == binomial(len(S), n):
+                raise RuntimeError("Error in orbit-stabilizer formula")
+        if verbose:
+            print("Number of new nodes: {}".format(len(self[n+1])))
+            print()
+
+    def identify_green(self, verbose=False):
+        edges = []
+        exclude = []
+        n = self.depth()
+        for mats in self[n]:
+            if self.forbid(mats, easy=True):
+                exclude.append(mats)
+            else:
+                tmp = [tuple(mats[n-1 if i==j else j if i==n-1 else i] for i in range(n)) for j in range(n-1)]
+                for i in tmp:
+                    mats1, g1 = self.orbit_rep(i, find_green=False)
+                    if mats1 is None:
+                        exclude.append(mats)
+                    else:
+                        edges.append((mats1, mats, g1))
+        if verbose:
+            print("Edges computed")
+        retract = GroupRetract(self.G, self[n].keys(), edges, exclude, self.forbid)
+        if verbose:
+            print("Retract computed")
+        # Mark nodes as green or red, and record group elements.
+        for mats in retract:
+            t = retract[mats]
+            self[n][mats]['gpel'] = t
+            if t[0] == mats:
+                self[n][mats]['stab'] = []
+        assert all('stab' in self[n][self[n][mats]['gpel'][0]] 
+                   for mats in self[n] if 'gpel' in self[n][mats])
+        self.scratch = (edges, retract)
+
+    def stabilizer_gens(self, verbose=False):
+        n = self.depth()
+        edges, retract = self.scratch
+        for e in edges:
+            if e[0] in retract:
+                mats1, g1 = retract[e[0]]
+                mats2, g2 = retract[e[1]]
+                assert mats1 == mats2
+                g = e[2]*g1
+                if g != g2:
+                    self[n][mats1]['stab'].append(~g2*g)
+        if verbose:
+            print("Stabilizer generators found")
+        self.scratch = None
+        
+    def extend(self, n, verbose=False):
+        while self.depth() < n:
+            self.nodes_at_new_level(verbose)
+            self.identify_green(verbose)
+
+# Legacy interface for backward compatibility
 
 # Given an orbit lookup tree at depth $n$ (for the action of a finite group $G$ on a finite set $S$), extend it in place
 # to depth $n+1$. For $n=0$, pass for `tree` an empty dict and it will be initialized correctly.
@@ -243,104 +380,21 @@ def orbit_rep_from_tree(G, tree, mats, apply_group_elem, optimized_rep, find_gre
 # - `optimized_rep` (optional): given an element $g \in G$, return an optimized representation of $g$.
 # - `forbid` (optional): given a tuple $(x_1,\dots,x_k)$, return True if the underlying subset $\{x_1,\dots,x_k\}$ is forbidden. It is assumed that this function is symmetric in the tuple and $G$-invariant. If some of these checks are time-consuming, only run them when the optional argument `easy` is True.
 
-def extend_orbit_tree(G, S, tree, methods, verbose=True, terminate=False):
-    apply_group_elem = methods['apply_group_elem']
-    stabilizer = methods['stabilizer'] if 'stabilizer' in methods else None
-    optimized_rep = methods['optimized_rep'] if 'optimized_rep' in methods else (lambda g: g)
-    forbid = methods['forbid'] if 'forbid' in methods else (lambda x, easy=False: False)
-    if not tree: # Initialize
-        S0 = tuple()
-        tree[0] = {S0: {'gpel': (S0, optimized_rep(G(1))), 'stab': []}}
-    n = max(tree.keys())
-    if verbose:
-        print("Current level: {}".format(n))
-    tree[n+1] = {}
-    for mats in tree[n]:
-        if 'stab' in tree[n][mats]: # Green node
-            # Compute the stabilizer of mats (deferred from the previous level).
-            if n == 0:
-                G0 = G
-                gens = list(G0.gens())
-            else:
-                parent = mats[:-1]
-                endgen = mats[-1]
-                G0 = tree[n-1][parent]['stab']
-                if G0.order() == 1:
-                    gens = []
-                elif stabilizer is not None:
-                    G0 = G0.intersection(stabilizer(endgen))
-                    gens = list(G0.gens())
-                else:
-                    retract = tree[n-1][parent]['retract']
-                    gens = retract.stabilizer_gens(endgen)
-            G1 = G.subgroup(gens + tree[n][mats]['stab'])
-            tree[n][mats]['stab'] = G1
-            if verbose:
-                print("Stabilizer order: {}".format(G1.order()))
-            vertices = [M for M in S if M not in mats]
-            # Construct the Cayley group retract under this green node.
-            retract = CayleyGroupRetract(G1, vertices, apply_group_elem, optimized_rep)
-            tree[n][mats]['retract'] = retract
-            if verbose:
-                print("Retract computed")
-            for M in retract:
-                if retract[M][0] != M: # Not an orbit representative
-                    continue
-                if M in mats:
-                    raise ValueError("Found repeated entry in tuple")
-                mats1 = mats + (M,)
-                tree[n+1][mats1] = {}
-    # If no forbidden vertices, check the orbit-stabilizer formula.
-    if 'forbid' not in methods:
-        N = G.order()
-        if not sum(N // tree[n][mats]['stab'].order() for mats in tree[n] if 'stab' in tree[n][mats]) == binomial(len(S), n):
-            raise RuntimeError("Error in orbit-stabilizer formula")
-
-    if verbose:
-        print()
-        print("Number of new nodes: {}".format(len(tree[n+1])))
-    edges = []
-    exclude = []
-    for mats in tree[n+1]:
-        if forbid(mats, easy=True):
-            exclude.append(mats)
-        else:
-            tmp = [tuple(mats[n if i==j else j if i==n else i] for i in range(n+1)) for j in range(n)]
-            for i in tmp:
-                mats1, g1 = orbit_rep_from_tree(G, tree, i, apply_group_elem, optimized_rep, find_green=False)
-                if mats1 is None:
-                    exclude.append(mats)
-                else:
-                    edges.append((mats1, mats, g1))
-    if verbose:
-        print("Edges computed")
-    retract = GroupRetract(G, tree[n+1].keys(), edges, exclude, forbid)
-    if verbose:
-        print("Retract computed")
-    # Mark nodes as green or red, and record group elements.
-    for mats in retract:
-        t = retract[mats]
-        tree[n+1][mats]['gpel'] = t
-        if t[0] == mats:
-            tree[n+1][mats]['stab'] = []
-    assert all('stab' in tree[n+1][tree[n+1][mats]['gpel'][0]] 
-                   for mats in tree[n+1] if 'gpel' in tree[n+1][mats])
+def extend_orbit_tree(G, S, outtree, methods, verbose=True, terminate=False):
+    apply_group_elem = outtree.apply_group_elem
+    stabilizer = outtree.stabilizer
+    optimized_rep = outtree.optimized_rep
+    forbid = outtree.forbid
+    tree = outtree.tree
+    n = outtree.depth()
+    outtree.extend(n+1, verbose)
 
     # Defer the computation of stabilizers, recording some elements read off of the graph.
     if terminate:
         if verbose:
             print("Stabilizer generators not computed")
     else:
-        for e in edges:
-            if e[0] in retract:
-                mats1, g1 = retract[e[0]]
-                mats2, g2 = retract[e[1]]
-                assert mats1 == mats2
-                g = e[2]*g1
-                if g != g2:
-                    tree[n+1][mats1]['stab'].append(~g2*g)
-        if verbose:
-            print("Stabilizer generators found")
+        outtree.stabilizer_gens(verbose)
     if verbose:
         print("Number of new green nodes: {}".format(sum(1 for mats in tree[n+1] 
                                                      if 'stab' in tree[n+1][mats])))
@@ -352,18 +406,25 @@ def extend_orbit_tree(G, S, tree, methods, verbose=True, terminate=False):
 # The semantics of methods are as in extend_orbit_tree.
 
 def build_orbit_tree(G, S, n, methods, verbose=True, terminate=True):    
-    # Verify that each generator of G defines a permutation of S.
+    outtree = OrbitLookupTree(G, S, methods)
     apply_group_elem = methods['apply_group_elem']
     optimized_rep = methods['optimized_rep'] if 'optimized_rep' in methods else lambda g: g
+    # Verify that each generator of G defines a permutation of S.
     for g in G.gens():
         gm = optimized_rep(g)
         Sg = [apply_group_elem(gm, x) for x in S]
         assert set(S) == set(Sg)
-    tree = {}
     for i in range(n):
-        extend_orbit_tree(G, S, tree, methods, verbose=verbose, terminate=(terminate and (i == n-1)))
-    return tree
+        outtree.extend(i+1, verbose)
+#        extend_orbit_tree(G, S, outtree, methods, verbose=verbose, terminate=(terminate and (i == n-1)))
+    return outtree
 
 # Return a list of green nodes at depth n.
 def green_nodes(tree, n):
-    return [mats for mats in tree[n] if 'stab' in tree[n][mats]]
+    return tree.green_nodes(n)
+
+# Use an enhanced $n$-orbit tree to identify an orbit representative for the action of the group $G$ on $k$-tuples.
+
+def orbit_rep_from_tree(G, tree, mats, apply_group_elem, optimized_rep, find_green=True):
+    return tree.orbit_rep(mats, find_green)
+
