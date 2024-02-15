@@ -209,12 +209,17 @@ class OrbitLookupTree():
     def __init__(self, G, vertices, methods):
         self.G = G
         self.vertices = vertices
-        self.apply_group_elem = methods['apply_group_elem']
+        self.apply_group_elem = methods['apply_group_elem'] if 'apply_group_elem' in methods else (lambda g, x: g*x)
         self.stabilizer = methods['stabilizer'] if 'stabilizer' in methods else None
         self.optimized_rep = methods['optimized_rep'] if 'optimized_rep' in methods else (lambda g: g)
         self.forbid = methods['forbid'] if 'forbid' in methods else (lambda x, easy=False: False)
+        self.identity = self.optimized_rep(G(1))
+        S = set(vertices)
+        for g in G.gens():
+            gm = optimized_rep(g)
+            assert all(self.apply_group_elem(gm, x) in S for x in S)
         S0 = tuple()
-        self.tree = {0: {S0: {'gpel': (S0, self.optimized_rep(G(1))), 'stab': []}}}
+        self.tree = {0: {S0: {'gpel': (S0, self.identity), 'stab': []}}}
         self.scratch = None
 
     def __getitem__(self, key):
@@ -236,13 +241,13 @@ class OrbitLookupTree():
         if n not in tree:
             raise ValueError("Tree not computed to depth {}".format(n))
         if n == 0:
-            return mats, self.optimized_rep(G(1))
+            return mats, self.identity
         mats0 = mats[:-1]
         if mats0 in tree[n-1] and 'gpel' not in tree[n-1][mats0]: # Truncation is an ineligible node
             return None, None
         elif mats0 in tree[n-1] and 'stab' in tree[n-1][mats0]: # Truncation is a green node
             assert 'retract' in tree[n-1][mats0]
-            g0 = self.optimized_rep(G(1))
+            g0 = self.identity
             y = mats[-1]
             assert y not in mats0
         else: # Truncation needs to be resolved
@@ -265,21 +270,21 @@ class OrbitLookupTree():
 
     def green_nodes(self, n):
         """
-        Return a list of green nodes at depth n.
+        Return an iterator over green nodes at depth n.
         """
-        return [mats for mats in self[n] if 'stab' in self[n][mats]]
+        for mats in self[n]:
+            if 'stab' in self[n][mats]:
+                yield mats
 
     def nodes_at_new_level(self, verbose=False):
         n = self.depth()
         if verbose:
             print("Current level: {}".format(n))
-        if self.scratch:
-            self.stabilizer_gens(verbose)
         self.tree[n+1] = {}
         G = self.G
         for mats in self[n]:
             if 'stab' in self[n][mats]: # Green node
-                # Compute the stabilizer of mats (deferred from the previous level).
+                # Compute the stabilizer of mats.
                 if n == 0:
                     G0 = G
                     gens = list(G0.gens())
@@ -319,7 +324,7 @@ class OrbitLookupTree():
             print("Number of new nodes: {}".format(len(self[n+1])))
             print()
 
-    def identify_green(self, verbose=False):
+    def classify_nodes(self, verbose=False):
         edges = []
         exclude = []
         n = self.depth()
@@ -348,6 +353,10 @@ class OrbitLookupTree():
         assert all('stab' in self[n][self[n][mats]['gpel'][0]] 
                    for mats in self[n] if 'gpel' in self[n][mats])
         self.scratch = (edges, retract)
+        if verbose:
+            print("Number of new green nodes: {}".format(sum(1 for _ in self.green_nodes(n))))
+            print("New level: {}".format(n))
+            print()
 
     def stabilizer_gens(self, verbose=False):
         n = self.depth()
@@ -366,8 +375,10 @@ class OrbitLookupTree():
         
     def extend(self, n, verbose=False):
         while self.depth() < n:
+            if self.scratch:
+                self.stabilizer_gens(verbose)
             self.nodes_at_new_level(verbose)
-            self.identify_green(verbose)
+            self.classify_nodes(verbose)
 
 # Legacy interface for backward compatibility
 
@@ -380,51 +391,25 @@ class OrbitLookupTree():
 # - `optimized_rep` (optional): given an element $g \in G$, return an optimized representation of $g$.
 # - `forbid` (optional): given a tuple $(x_1,\dots,x_k)$, return True if the underlying subset $\{x_1,\dots,x_k\}$ is forbidden. It is assumed that this function is symmetric in the tuple and $G$-invariant. If some of these checks are time-consuming, only run them when the optional argument `easy` is True.
 
-def extend_orbit_tree(G, S, outtree, methods, verbose=True, terminate=False):
-    apply_group_elem = outtree.apply_group_elem
-    stabilizer = outtree.stabilizer
-    optimized_rep = outtree.optimized_rep
-    forbid = outtree.forbid
-    tree = outtree.tree
-    n = outtree.depth()
-    outtree.extend(n+1, verbose)
-
-    # Defer the computation of stabilizers, recording some elements read off of the graph.
-    if terminate:
-        if verbose:
-            print("Stabilizer generators not computed")
-    else:
-        outtree.stabilizer_gens(verbose)
-    if verbose:
-        print("Number of new green nodes: {}".format(sum(1 for mats in tree[n+1] 
-                                                     if 'stab' in tree[n+1][mats])))
-        print("New level: {}".format(max(tree.keys())))
-        print()
+def extend_orbit_tree(G, S, tree, methods=None, verbose=True, terminate=False):
+    n = tree.depth()
+    tree.extend(n+1, verbose)
 
 # Build an orbit lookup tree to depth n. By default, we do not record stabilizer generators at depth n,
 # so the result cannot be used to extend to depth n+1; set terminate=False to override this.
 # The semantics of methods are as in extend_orbit_tree.
 
 def build_orbit_tree(G, S, n, methods, verbose=True, terminate=True):    
-    outtree = OrbitLookupTree(G, S, methods)
-    apply_group_elem = methods['apply_group_elem']
-    optimized_rep = methods['optimized_rep'] if 'optimized_rep' in methods else lambda g: g
-    # Verify that each generator of G defines a permutation of S.
-    for g in G.gens():
-        gm = optimized_rep(g)
-        Sg = [apply_group_elem(gm, x) for x in S]
-        assert set(S) == set(Sg)
-    for i in range(n):
-        outtree.extend(i+1, verbose)
-#        extend_orbit_tree(G, S, outtree, methods, verbose=verbose, terminate=(terminate and (i == n-1)))
-    return outtree
+    tree = OrbitLookupTree(G, S, methods)
+    tree.extend(n, verbose)
+    return tree
 
 # Return a list of green nodes at depth n.
 def green_nodes(tree, n):
-    return tree.green_nodes(n)
+    return list(tree.green_nodes(n))
 
 # Use an enhanced $n$-orbit tree to identify an orbit representative for the action of the group $G$ on $k$-tuples.
 
-def orbit_rep_from_tree(G, tree, mats, apply_group_elem, optimized_rep, find_green=True):
+def orbit_rep_from_tree(G, tree, mats, apply_group_elem=None, optimized_rep=None, find_green=True):
     return tree.orbit_rep(mats, find_green)
 
