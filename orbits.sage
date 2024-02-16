@@ -69,12 +69,12 @@ class GroupRetract():
     
     The underlying dict is stored as the attribute ``d``, but one can also index directly.
     """
-    def __init__(self, G, vertices, edges, exclude=[], forbid=None, forward_only=False, optimized_rep=None):
+    def __init__(self, G, vertices, neighbors, exclude=[], forbid=None, forward_only=False, optimized_rep=None):
         self.G = G
         vertices = list(vertices)
         self.optimized_rep = optimized_rep if optimized_rep else (lambda g: g)
         # Early abort if there are no edges and nothing to exclude (e.g., a Cayley digraph for the trivial group).
-        if not edges and not exclude and not forbid:
+        if not neighbors and not exclude and not forbid:
            iden = optimized_rep(G(1)) if optimized_rep else G(1)
            self.d = {v: (v, iden) for v in vertices}
            self.forbidden_verts = set()
@@ -83,12 +83,13 @@ class GroupRetract():
         d = {}
         iden = self.optimized_rep(G(1))
         forbidden_reps = set()
+        self.orbit_len = {}
         for v in vertices:
             if v not in d:
                 if forbid and forbid(v):
                     forbidden_reps.add(v)
                 d[v] = (v, iden)
-                bfs(edges, d, v)
+                self.orbit_len[v] = bfs(neighbors, d, v)
         # Identify orbit representatives of excluded vertices.
         for v in exclude:
             forbidden_reps.add(d[v][0])
@@ -108,7 +109,7 @@ class GroupRetract():
         return self.d.keys()
         
     def reps(self):
-        for v in self.d.keys():
+        for v in self.d:
             if self[v][0] == v:
                 yield v
 
@@ -124,8 +125,11 @@ class CayleyGroupRetract(GroupRetract):
         self.apply_group_elem = apply_group_elem
         if debug:
             assert all(apply_group_elem(g, v) in vertex_set for g in gens for v in vertex_set)
-        edges = None if G.order() == 1 else {M: {apply_group_elem(g, M): g for g in gens} for M in vertices}
-        GroupRetract.__init__(self, G, vertices, edges, forward_only=True, optimized_rep=optimized_rep)
+        if G.order() == 1:
+            neighbors = None
+        else: 
+            neighbors = lambda M, act=apply_group_elem, gens=gens: ((act(g, M), g) for g in gens)
+        GroupRetract.__init__(self, G, vertices, neighbors, forward_only=True, optimized_rep=optimized_rep)
 
     def stabilizer_gens(self, v):
         """
@@ -134,18 +138,19 @@ class CayleyGroupRetract(GroupRetract):
         mats0, g0 = self[v]
         vertices = tuple(self.vertices())
         # Use the orbit-stabilizer formula to compute the stabilizer order.
-        orbit_len = sum(1 for e0 in self if e0 in self and self[e0][0] == mats0)
+        orbit_len = self.orbit_len[mats0]
         target_order = ZZ(self.G.order() / orbit_len)
         # Produce random stabilizer elements until we hit the right order.
         gens = []
+        d = self.d
         while target_order > 1:
             e1 = random.choice(vertices)
-            mats1, g1 = self[e1]
+            mats1, g1 = d[e1]
             if mats1 != mats0:
                 continue
             rgen = random.choice(self.gens)
             e2 = self.apply_group_elem(rgen, e1)
-            mats2, g2 = self[e2]
+            mats2, g2 = d[e2]
             assert mats2 == mats0
             g = rgen*g1
             if g != g2:
@@ -209,13 +214,10 @@ class OrbitLookupTree():
     def depth(self):
         return max(self.tree.keys())
 
-    def orbit_rep(self, mats, find_green=True):
+    def orbit_rep_recursive(self, mats, n, find_green=True):
         """
         Find the orbit representative for a given tuple.
         """
-        n = len(mats)
-        if self.depth() < n:
-            raise ValueError("Tree not computed to depth {}".format(n))
         if n == 0:
             return mats, self.identity
         mats0 = mats[:-1]
@@ -227,7 +229,7 @@ class OrbitLookupTree():
             y = mats[-1]
             assert y not in mats0
         else: # Truncation needs to be resolved
-            mats0, g0 = self.orbit_rep(mats0, find_green=True)
+            mats0, g0 = self.orbit_rep_recursive(mats0, n-1)
             if mats0 is None:
                 return None, None
             assert 'gpel' in self[n-1][mats0]
@@ -243,6 +245,15 @@ class OrbitLookupTree():
         mats2, g2 = self[n][mats1]['gpel']
         assert 'gpel' in self[n][mats2]
         return mats2, g0*g1*g2
+        
+    def orbit_rep(self, mats):
+        """
+        Find the orbit representative for a given tuple.
+        """
+        n = len(mats)
+        if n not in self:
+            raise ValueError("Tree not computed to depth {}".format(n))
+        return self.orbit_rep_recursive(mats, n)
 
     def green_nodes(self, n):
         r"""
@@ -314,22 +325,23 @@ class OrbitLookupTree():
         edges = {}
         exclude = []
         n = self.depth()
-        edges = {mats: {} for mats in self[n]}
+        edges = {mats: [] for mats in self[n]}
         for mats in self[n]:
             if self.forbid(mats, easy=True):
                 exclude.append(mats)
             else:
                 tmp = [tuple(mats[n-1 if i==j else j if i==n-1 else i] for i in range(n)) for j in range(n-1)]
                 for i in tmp:
-                    mats1, g1 = self.orbit_rep(i, find_green=False)
+                    mats1, g1 = self.orbit_rep_recursive(i, n, find_green=False)
                     if mats1 is None:
                         exclude.append(mats)
                     else:
-                        edges[mats1][mats] = g1
-                        edges[mats][mats1] = ~g1
+                        edges[mats1].append((mats, g1))
+                        edges[mats].append((mats1, ~g1))
         if verbose:
             print("Edges computed")
-        retract = GroupRetract(self.G, self[n].keys(), edges, exclude, self.forbid)
+        neighbors = lambda M, edges=edges: edges[M]
+        retract = GroupRetract(self.G, self[n].keys(), neighbors, exclude, self.forbid, optimized_rep= self.optimized_rep)
         if verbose:
             print("Retract computed")
         # Mark nodes as green or red, and record group elements.
@@ -405,5 +417,5 @@ def green_nodes(tree, n):
 # Use an enhanced $n$-orbit tree to identify an orbit representative for the action of the group $G$ on $k$-tuples.
 
 def orbit_rep_from_tree(G, tree, mats, apply_group_elem=None, optimized_rep=None, find_green=True):
-    return tree.orbit_rep(mats, find_green)
+    return tree.orbit_rep(mats)
 
