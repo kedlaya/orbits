@@ -69,7 +69,7 @@ class GroupRetract():
     
     The underlying dict is stored as the attribute ``d``, but one can also index directly.
     """
-    def __init__(self, G, vertices, neighbors, exclude=[], forbid=None, forward_only=False, optimized_rep=None):
+    def __init__(self, G, vertices, neighbors, exclude=[], forbid=None, optimized_rep=None):
         self.G = G
         vertices = list(vertices)
         self.optimized_rep = optimized_rep if optimized_rep else (lambda g: g)
@@ -89,7 +89,7 @@ class GroupRetract():
                 if forbid and forbid(v):
                     forbidden_reps.add(v)
                 d[v] = (v, iden)
-                self.orbit_len[v] = bfs(neighbors, d, v)
+                self.orbit_len[v] = dfs(neighbors, d, v)
         # Identify orbit representatives of excluded vertices.
         for v in exclude:
             forbidden_reps.add(d[v][0])
@@ -109,8 +109,8 @@ class GroupRetract():
         return self.d.keys()
         
     def reps(self):
-        for v in self.d:
-            if self[v][0] == v:
+        for v, t in self.d.items():
+            if t[0] == v:
                 yield v
 
 class CayleyGroupRetract(GroupRetract):
@@ -121,15 +121,15 @@ class CayleyGroupRetract(GroupRetract):
         self.optimized_rep = optimized_rep if optimized_rep else (lambda g: g)
         gens = [self.optimized_rep(g) for g in random_generating_sequence(G)]
         self.gens = gens
-        vertex_set = set(vertices)
         self.apply_group_elem = apply_group_elem
         if debug:
+            vertex_set = set(vertices)
             assert all(apply_group_elem(g, v) in vertex_set for g in gens for v in vertex_set)
         if G.order() == 1:
             neighbors = None
         else: 
             neighbors = lambda M, act=apply_group_elem, gens=gens: ((act(g, M), g) for g in gens)
-        GroupRetract.__init__(self, G, vertices, neighbors, forward_only=True, optimized_rep=optimized_rep)
+        GroupRetract.__init__(self, G, vertices, neighbors, optimized_rep=optimized_rep)
 
     def stabilizer_gens(self, v):
         """
@@ -195,7 +195,7 @@ class OrbitLookupTree():
         self.apply_group_elem = methods['apply_group_elem'] if 'apply_group_elem' in methods else (lambda g, x: g*x)
         self.stabilizer = methods['stabilizer'] if 'stabilizer' in methods else None
         self.optimized_rep = methods['optimized_rep'] if 'optimized_rep' in methods else (lambda g: g)
-        self.forbid = methods['forbid'] if 'forbid' in methods else (lambda x, easy=False: False)
+        self.forbid = methods['forbid'] if 'forbid' in methods else None
         self.identity = self.optimized_rep(G(1))
         S = set(vertices)
         for g in G.gens():
@@ -259,8 +259,9 @@ class OrbitLookupTree():
         r"""
         Return an iterator over green nodes at depth `n`.
         """
-        for mats in self[n]:
-            if 'stab' in self[n][mats]:
+        selfn = self[n]
+        for mats, selfnmats in selfn.items():
+            if 'stab' in selfnmats:
                 yield mats
 
     def nodes_at_new_level(self, verbose=False):
@@ -327,7 +328,7 @@ class OrbitLookupTree():
         n = self.depth()
         edges = {mats: [] for mats in self[n]}
         for mats in self[n]:
-            if self.forbid(mats, easy=True):
+            if self.forbid(mats):
                 exclude.append(mats)
             else:
                 tmp = [tuple(mats[n-1 if i==j else j if i==n-1 else i] for i in range(n)) for j in range(n-1)]
@@ -341,7 +342,7 @@ class OrbitLookupTree():
         if verbose:
             print("Edges computed")
         neighbors = lambda M, edges=edges: edges[M]
-        retract = GroupRetract(self.G, self[n].keys(), neighbors, exclude, self.forbid, optimized_rep= self.optimized_rep)
+        retract = GroupRetract(self.G, self[n].keys(), neighbors, exclude, self.forbid, optimized_rep=self.optimized_rep)
         if verbose:
             print("Retract computed")
         # Mark nodes as green or red, and record group elements.
@@ -364,6 +365,7 @@ class OrbitLookupTree():
         """
         n = self.depth()
         edges, retract = self.scratch
+        selfn = self[n]
         for e in edges:
             if e[0] in retract:
                 mats1, g1 = retract[e[0]]
@@ -371,7 +373,7 @@ class OrbitLookupTree():
                 assert mats1 == mats2
                 g = e[2]*g1
                 if g != g2:
-                    self[n][mats1]['stab'].append(~g2*g)
+                    selfn[mats1]['stab'].append(~g2*g)
         if verbose:
             print("Stabilizer generators found")
         self.scratch = None
@@ -385,37 +387,4 @@ class OrbitLookupTree():
                 self.stabilizer_gens(verbose)
             self.nodes_at_new_level(verbose)
             self.classify_nodes(verbose)
-
-# Legacy interface for backward compatibility
-
-# Given an orbit lookup tree at depth $n$ (for the action of a finite group $G$ on a finite set $S$), extend it in place
-# to depth $n+1$. For $n=0$, pass for `tree` an empty dict and it will be initialized correctly.
-#
-# The argument `methods` is a dictionary containing functions as specified:
-# - `apply_group_elem`: given a pair $(g, x) \in G \times S$, returns $g(x)$.
-# - `stabilizer` (optional): given $x \in S$, returns a group whose intersection with $G$ (in some ambient group) is $G_x$. If omitted, we instead use data from the group retract computation to find stabilizers.
-# - `optimized_rep` (optional): given an element $g \in G$, return an optimized representation of $g$.
-# - `forbid` (optional): given a tuple $(x_1,\dots,x_k)$, return True if the underlying subset $\{x_1,\dots,x_k\}$ is forbidden. It is assumed that this function is symmetric in the tuple and $G$-invariant. If some of these checks are time-consuming, only run them when the optional argument `easy` is True.
-
-def extend_orbit_tree(G, S, tree, methods=None, verbose=True, terminate=False):
-    n = tree.depth()
-    tree.extend(n+1, verbose)
-
-# Build an orbit lookup tree to depth n. By default, we do not record stabilizer generators at depth n,
-# so the result cannot be used to extend to depth n+1; set terminate=False to override this.
-# The semantics of methods are as in extend_orbit_tree.
-
-def build_orbit_tree(G, S, n, methods, verbose=True, terminate=True):    
-    tree = OrbitLookupTree(G, S, methods)
-    tree.extend(n, verbose)
-    return tree
-
-# Return a list of green nodes at depth n.
-def green_nodes(tree, n):
-    return list(tree.green_nodes(n))
-
-# Use an enhanced $n$-orbit tree to identify an orbit representative for the action of the group $G$ on $k$-tuples.
-
-def orbit_rep_from_tree(G, tree, mats, apply_group_elem=None, optimized_rep=None, find_green=True):
-    return tree.orbit_rep(mats)
 

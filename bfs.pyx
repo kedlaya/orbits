@@ -1,4 +1,4 @@
-def bfs(neighbors, dict d, v0):
+def dfs(neighbors, dict d, v0):
     cdef long c = 0
     cdef long count = 1
     cdef list queue = [(v0, d[v0])]
@@ -12,4 +12,9 @@ def bfs(neighbors, dict d, v0):
                 queue.append((x, u))
                 count += 1
     return count
+
+def mult_immutable(mat, vec):
+    ans = mat*vec
+    ans.set_immutable()
+    return ans
 
