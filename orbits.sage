@@ -288,6 +288,31 @@ class OrbitLookupTree():
             if 'stab' in selfnmats:
                 yield mats
 
+    def stabilizer_from_gens(self, mats):
+        """
+        Compute the stabilizer of a subset of vertices.
+        """
+        n = len(mats)
+        selfnmats = self[n][mats]
+        if n == 0:
+            G0 = self.G
+            gens = list(G0.gens())
+        else:
+            parent = mats[:-1]
+            endgen = mats[-1]
+            G0 = self[n-1][parent]['stab']
+            if G0.order() == 1:
+                gens = []
+            elif self.stabilizer is not None:
+                G0 = G0.intersection(self.stabilizer(endgen))
+                gens = list(G0.gens())
+            else:
+                retract = self[n-1][parent]['retract']
+                gens = retract.stabilizer_gens(endgen)
+        G1 = self.G.subgroup(gens + selfnmats['stab'])
+        selfnmats['stab'] = G1
+        return G1
+
     def nodes_at_new_level(self, verbose=False):
         """
         Compute nodes at a new level of the tree (without classifying them).
@@ -297,34 +322,13 @@ class OrbitLookupTree():
             print("Current level: {}".format(n))
         self.tree[n+1] = {}
         G = self.G
-        if n > 0:
-            selfnm1 = self[n-1]
-        selfn = self[n]
-        selfnp1 = self[n+1]
         check_count = 0
         for mats in self.green_nodes(n):
-            selfnmats = selfn[mats]
-            # Compute the stabilizer of mats as an *unordered* tuple.
-            if n == 0:
-                G0 = G
-                gens = list(G0.gens())
-            else:
-                parent = mats[:-1]
-                endgen = mats[-1]
-                G0 = selfnm1[parent]['stab']
-                if G0.order() == 1:
-                    gens = []
-                elif self.stabilizer is not None:
-                    G0 = G0.intersection(self.stabilizer(endgen))
-                    gens = list(G0.gens())
-                else:
-                    retract = selfnm1[parent]['retract']
-                    gens = retract.stabilizer_gens(endgen)
-            G1 = G.subgroup(gens + selfnmats['stab'])
-            selfnmats['stab'] = G1
+            G1 = self.stabilizer_from_gens(mats)
             if verbose:
                 print("Stabilizer order: {}".format(G1.order()))
             check_count += G.order() // G1.order()
+            # Construct the Cayley group retract under this green node.
             if self.V:
                 W = self.V.quotient(self.V.subspace(mats))
                 vertices = [W.lift(w) for w in W if w]
@@ -334,9 +338,8 @@ class OrbitLookupTree():
             else:
                 vertices = [M for M in self.vertices if M not in mats]
                 apply_group_elem = self.apply_group_elem
-            # Construct the Cayley group retract under this green node.
             retract = CayleyGroupRetract(G1, vertices, apply_group_elem, self.optimized_rep)
-            selfnmats['retract'] = retract
+            self[n][mats]['retract'] = retract
             if verbose:
                 print("Retract computed")
             for M in retract.reps():
@@ -347,7 +350,7 @@ class OrbitLookupTree():
                 else:
                     if M in mats:
                         raise ValueError("Found repeated entry in tuple")
-                selfnp1[mats1] = {}
+                self[n+1][mats1] = {}
         # If no forbidden vertices, check the orbit-stabilizer formula.
         if not self.V and not self.forbid:
             if check_count != binomial(len(self.vertices), n):
