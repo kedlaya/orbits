@@ -155,9 +155,10 @@ class CayleyGroupRetract(GroupRetract):
         # Early abort for the trivial group.
         if target_order == 1:
             H = G.subgroup([])
-            return ([] if gens else H)
+            return ([], [] if gens else H)
         # Produce random stabilizer elements until we hit the right order.
         stab_gens = []
+        stab_gens_in_G = []
         d = self.d
         while True:
             e1 = random.choice(vertices)
@@ -171,11 +172,12 @@ class CayleyGroupRetract(GroupRetract):
             g = rgen*g1
             if g != g2:
                 h = g0*~g2*g*~g0
-                stab_gens.append(self.G(h))
-                H = self.G.subgroup(stab_gens) 
+                stab_gens.append(h)
+                stab_gens_in_G.append(self.G(h))
+                H = self.G.subgroup(stab_gens_in_G) 
                 if H.order() == target_order:
                      break
-        return (stab_gens if gens else H)
+        return (stab_gens, stab_gens_in_G if gens else H)
 
 class OrbitLookupTree():
     r"""
@@ -310,11 +312,18 @@ class OrbitLookupTree():
         if self.stabilizer is not None:
             G1 = G0.intersection(self.stabilizer(endgen))
             gens = G1.gens()
+            optimized_gens = [self.optimized_rep(g) for g in random_generating_sequence(G2)]
         else:
             retract = self[n-1][parent]['retract']
-            gens = retract.stabilizer(endgen, gens=True)
+            optimized_gens, gens = retract.stabilizer(endgen, gens=True)
         G2 = self.G.subgroup(gens + selfnmats['stab'][1])
-        selfnmats['stab'] = (selfnmats['stab'][0], G2, G2.order(), [self.optimized_rep(g) for g in random_generating_sequence(G2)])
+        optimized_gens = optimized_gens + selfnmats['stab'][1]
+        edges = [(i, mats.index(self.apply_group_elem(g, mats[i]))) for g in optimized_gens for i in range(n)]
+        Gamma = Graph(n, loops=True)
+        Gamma.add_edges(edges)
+        partition = Gamma.connected_components(sort=False)
+        selfnmats['stab'] = (partition, G2, G2.order(), optimized_gens)
+#        selfnmats['stab'] = ([[i] for i in range(n)], G2, G2.order(), optimized_gens)
 
     def construct_children(self, mats, verbose=False):
         """
@@ -406,7 +415,7 @@ class OrbitLookupTree():
                 for j in range(n-1):
                     mats1, g1 = tmp2[j]
                     edges[mats1].append((mats, g1, j))
-                    edges[mats].append((mats1, ~g1, j))
+                    edges[mats].append((mats1, ~g1, None))
         if verbose:
             print("Edges computed")
         neighbors = lambda M, edges=edges: edges[M]
@@ -438,15 +447,16 @@ class OrbitLookupTree():
                 mats0, g1 = retract[mats1]
                 partition, gens = selfn[mats0]['stab']
                 for mats2, g0, j in edges[mats1]:
+                    if j is None:
+                        continue
                     i1 = min(i for i in range(len(partition)) if n-1 in partition[i])
                     i2 = min(i for i in range(len(partition)) if j in partition[i])
                     if i1 != i2:
-                        partition[i1] = partition[i1] + partition[i2]
+                        partition[i1].extend(partition[i2])
                         partition.pop(i2)
-                    assert mats0 == retract[mats2][0]
-                    g2 = retract[mats2][1]
-                    g = g0*g1
-                    if g != g2:
+                        assert mats0 == retract[mats2][0]
+                        g2 = retract[mats2][1]
+                        g = g0*g1
                         gens.append(~g2*g)
         if verbose:
             print("Stabilizer generators found")
