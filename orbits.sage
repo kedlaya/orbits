@@ -318,12 +318,12 @@ class OrbitLookupTree():
             optimized_gens, gens = retract.stabilizer(endgen, gens=True)
         G2 = self.G.subgroup(gens + selfnmats['stab'][1])
         optimized_gens = optimized_gens + selfnmats['stab'][1]
-        edges = [(i, mats.index(self.apply_group_elem(g, mats[i]))) for g in optimized_gens for i in range(n)]
-        Gamma = Graph(n, loops=True)
-        Gamma.add_edges(edges)
-        partition = Gamma.connected_components(sort=False)
+#        edges = [(i, mats.index(self.apply_group_elem(g, mats[i]))) for g in optimized_gens for i in range(n)]
+#        Gamma = Graph(n, loops=True)
+#        Gamma.add_edges(edges)
+#        partition = Gamma.connected_components(sort=False)
+        partition = [[i] for i in range(n)]
         selfnmats['stab'] = (partition, G2, G2.order(), optimized_gens)
-#        selfnmats['stab'] = ([[i] for i in range(n)], G2, G2.order(), optimized_gens)
 
     def construct_children(self, mats, verbose=False):
         """
