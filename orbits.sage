@@ -302,8 +302,8 @@ class OrbitLookupTree():
         n = len(mats)
         selfnmats = self[n][mats]
         if n == 0:
-            selfnmats['stab'] = self.G
-            return self.G
+            selfnmats['stab'] = ([], self.G, self.G_order, [self.optimized_rep(g) for g in random_generating_sequence(self.G)])
+            return None
         parent = mats[:-1]
         endgen = mats[-1]
         G0 = self[n-1][parent]['stab']
@@ -313,9 +313,8 @@ class OrbitLookupTree():
         else:
             retract = self[n-1][parent]['retract']
             gens = retract.stabilizer(endgen, gens=True)
-        G2 = self.G.subgroup(gens + selfnmats['stab'])
-        selfnmats['stab'] = G2
-        return G2
+        G2 = self.G.subgroup(gens + selfnmats['stab'][1])
+        selfnmats['stab'] = (selfnmats['stab'][0], G2, G2.order(), [self.optimized_rep(g) for g in random_generating_sequence(G2)])
 
     def construct_children(self, mats, verbose=False):
         """
@@ -331,8 +330,8 @@ class OrbitLookupTree():
         else:
             vertices = [M for M in self.vertices if M not in mats]
             apply_group_elem = self.apply_group_elem
-        G1 = self[n][mats]['stab']
-        retract = CayleyGroupRetract(G1, vertices, apply_group_elem, self.optimized_rep)
+        _, G1, order, gens = self[n][mats]['stab']
+        retract = CayleyGroupRetract(self.G, vertices, apply_group_elem, self.optimized_rep, gens=gens, order=order)
         self[n][mats]['retract'] = retract
         if verbose:
             print("Retract computed")
@@ -357,11 +356,13 @@ class OrbitLookupTree():
         G = self.G
         check_count = 0
         for mats in self.green_nodes(n):
-            G1 = self.stabilizer_from_gens(mats)
+            self.stabilizer_from_gens(mats)
+            _, G1, order, gens = self[n][mats]['stab']
             if verbose:
-                print("Stabilizer computed")
+                print("Stabilizer computed: order {}".format(order))
             if not self.V and not self.forbid:
-                check_count += self.G_order // G1.order()
+                assert self.G_order % order == 0
+                check_count += self.G_order // order
             self.construct_children(mats, verbose)
         # If no forbidden vertices, check the orbit-stabilizer formula.
         if not self.V and not self.forbid:
@@ -417,7 +418,7 @@ class OrbitLookupTree():
             t = retract[mats]
             self[n][mats]['gpel'] = t
             if t[0] == mats:
-                self[n][mats]['stab'] = []
+                self[n][mats]['stab'] = (self[n-1][mats[:-1]]['stab'][0] + [[n-1]], [])
         assert all('stab' in self[n][self[n][mats]['gpel'][0]] for mats in self[n] if 'gpel' in self[n][mats])
         self.scratch = (edges, retract)
         if verbose:
@@ -435,12 +436,18 @@ class OrbitLookupTree():
         for mats1 in edges:
             if mats1 in retract:
                 mats0, g1 = retract[mats1]
+                partition, gens = selfn[mats0]['stab']
                 for mats2, g0, j in edges[mats1]:
+                    i1 = min(i for i in range(len(partition)) if n-1 in partition[i])
+                    i2 = min(i for i in range(len(partition)) if j in partition[i])
+                    if i1 != i2:
+                        partition[i1] = partition[i1] + partition[i2]
+                        partition.pop(i2)
                     assert mats0 == retract[mats2][0]
                     g2 = retract[mats2][1]
                     g = g0*g1
                     if g != g2:
-                        selfn[mats0]['stab'].append(~g2*g)
+                        gens.append(~g2*g)
         if verbose:
             print("Stabilizer generators found")
         self.scratch = None
