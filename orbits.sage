@@ -132,11 +132,7 @@ class GroupRetract():
 class CayleyGroupRetract(GroupRetract):
     """
     Specialized version of GroupRetract for full Cayley digraphs.
-<<<<<<< HEAD
-    
-=======
 
->>>>>>> fix2
     If ``gens`` is specified, it is assumed to be a list of elements of `G`.
     These do not have to generate `G`; however, if they do not, then `order` is assumed
     to be the order of the subgroup that they generate.
@@ -278,7 +274,7 @@ class OrbitLookupTree():
         mats1 = mats0 + (z,)
         if not find_green:
             return mats1, g0*g1
-        if 'gpel' not in self[n][mats1]:
+        if 'gpel' not in self[n][mats1]: # Found an ineligible node
             return None, None
         mats2, g2 = self[n][mats1]['gpel']
         assert 'gpel' in self[n][mats2]
@@ -322,8 +318,7 @@ class OrbitLookupTree():
             retract = self[n-1][parent]['retract']
             optimized_gens, gens, G1_order = retract.stabilizer(endgen, gens=True)
         G2 = self.G.subgroup(gens + selfnmats['stab'])
-        optimized_gens = optimized_gens + selfnmats['stab']
-        selfnmats['stab'] = (G2.order(), optimized_gens)
+        selfnmats['stab'] = (G2.order(), optimized_gens + selfnmats['stab'])
 
     def construct_children(self, mats, verbose=False):
         """
@@ -399,7 +394,7 @@ class OrbitLookupTree():
             t = retract[mats]
             self[n][mats]['gpel'] = t
             if t[0] == mats:
-                self[n][mats]['stab'] = (self[n-1][mats[:-1]]['stab'][0] + [[n-1]], [])
+                self[n][mats]['stab'] = []
         assert all('stab' in self[n][self[n][mats]['gpel'][0]] for mats in self[n] if 'gpel' in self[n][mats])
         self.scratch = (edges, retract)
         if verbose:
@@ -415,17 +410,17 @@ class OrbitLookupTree():
         edges, retract = self.scratch
         selfn = self[n]
         for mats1 in self.green_nodes(n):
-                mats0, g1 = retract[mats1]
-                assert mats0 == mats1
-                gens = selfn[mats0]['stab']
-                for mats2, g0, j in edges[mats1]:
-                    if j is None:
-                        continue
-                    assert mats0 == retract[mats2][0]
-                    g2 = retract[mats2][1]
-                    g = g0*g1
-                    if g != g2:
-                        gens.append(~g2*g)
+            mats0, g1 = retract[mats1]
+            assert mats0 == mats1
+            gens = selfn[mats0]['stab']
+            for mats2, g0, j in edges[mats1]:
+                if j is None: # Ignore backwards edges
+                    continue
+                assert mats0 == retract[mats2][0]
+                g2 = retract[mats2][1]
+                g = g0*g1
+                if g != g2:
+                    gens.append(~g2*g)
         if verbose:
             print("Stabilizer generators found")
         self.scratch = None
