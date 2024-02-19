@@ -450,9 +450,9 @@ class OrbitLookupTree():
         n = self.depth()
         edges, retract = self.scratch
         selfn = self[n]
-        for mats1 in edges:
-            if mats1 in retract:
+        for mats1 in self.green_nodes(n):
                 mats0, g1 = retract[mats1]
+                assert mats0 == mats1
                 partition, gens = selfn[mats0]['stab']
                 for mats2, g0, j in edges[mats1]:
                     if j is None:
