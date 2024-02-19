@@ -230,9 +230,9 @@ class OrbitLookupTree():
         self.forbid = methods['forbid'] if 'forbid' in methods else None
         self.identity = self.optimized_rep(G(1))
         S = set(self.vertices)
-        for g in G.gens():
-            gm = optimized_rep(g)
-            assert all(self.apply_group_elem(gm, x) in S for x in S)
+        self.G_gens = [self.optimized_rep(g) for g in random_generating_sequence(G)]
+        for g in self.G_gens:
+            assert all(self.apply_group_elem(g, x) in S for x in S)
         S0 = tuple()
         self.tree = {0: {S0: {'gpel': (S0, self.identity), 'stab': []}}}
         self.scratch = None
@@ -312,7 +312,7 @@ class OrbitLookupTree():
         n = len(mats)
         selfnmats = self[n][mats]
         if n == 0:
-            selfnmats['stab'] = ([], self.G, self.G_order, [self.optimized_rep(g) for g in random_generating_sequence(self.G)])
+            selfnmats['stab'] = (self.G, self.G_order, self.G_gens)
             return None
         parent = mats[:-1]
         endgen = mats[-1]
@@ -320,18 +320,13 @@ class OrbitLookupTree():
         if self.stabilizer is not None:
             G1 = G0.intersection(self.stabilizer(endgen))
             gens = G1.gens()
-            optimized_gens = [self.optimized_rep(g) for g in random_generating_sequence(G2)]
+            optimized_gens = [self.optimized_rep(g) for g in random_generating_sequence(G1)]
         else:
             retract = self[n-1][parent]['retract']
             optimized_gens, gens, G1_order = retract.stabilizer(endgen, gens=True)
-        G2 = self.G.subgroup(gens + selfnmats['stab'][1])
-        optimized_gens = optimized_gens + selfnmats['stab'][1]
-#        edges = [(i, mats.index(self.apply_group_elem(g, mats[i]))) for g in optimized_gens for i in range(n)]
-#        Gamma = Graph(n, loops=True)
-#        Gamma.add_edges(edges)
-#        partition = Gamma.connected_components(sort=False)
-        partition = [[i] for i in range(n)]
-        selfnmats['stab'] = (partition, G2, G2.order(), optimized_gens)
+        G2 = self.G.subgroup(gens + selfnmats['stab'])
+        optimized_gens = optimized_gens + selfnmats['stab']
+        selfnmats['stab'] = (G2, G2.order(), optimized_gens)
 
     def construct_children(self, mats, verbose=False):
         """
@@ -347,7 +342,7 @@ class OrbitLookupTree():
         else:
             vertices = [M for M in self.vertices if M not in mats]
             apply_group_elem = self.apply_group_elem
-        _, G1, order, gens = self[n][mats]['stab']
+        _, order, gens = self[n][mats]['stab']
         retract = CayleyGroupRetract(self.G, vertices, apply_group_elem, self.optimized_rep, gens=gens, order=order)
         self[n][mats]['retract'] = retract
         if verbose:
@@ -374,7 +369,7 @@ class OrbitLookupTree():
         check_count = 0
         for mats in self.green_nodes(n):
             self.stabilizer_from_gens(mats)
-            _, G1, order, gens = self[n][mats]['stab']
+            _, order, gens = self[n][mats]['stab']
             if verbose:
                 print("Stabilizer computed: order {}".format(order))
             if not self.V and not self.forbid:
@@ -435,7 +430,7 @@ class OrbitLookupTree():
             t = retract[mats]
             self[n][mats]['gpel'] = t
             if t[0] == mats:
-                self[n][mats]['stab'] = (self[n-1][mats[:-1]]['stab'][0] + [[n-1]], [])
+                self[n][mats]['stab'] = []
         assert all('stab' in self[n][self[n][mats]['gpel'][0]] for mats in self[n] if 'gpel' in self[n][mats])
         self.scratch = (edges, retract)
         if verbose:
@@ -453,18 +448,14 @@ class OrbitLookupTree():
         for mats1 in self.green_nodes(n):
                 mats0, g1 = retract[mats1]
                 assert mats0 == mats1
-                partition, gens = selfn[mats0]['stab']
+                gens = selfn[mats0]['stab']
                 for mats2, g0, j in edges[mats1]:
                     if j is None:
                         continue
-                    i1 = min(i for i in range(len(partition)) if n-1 in partition[i])
-                    i2 = min(i for i in range(len(partition)) if j in partition[i])
-                    if i1 != i2:
-                        partition[i1].extend(partition[i2])
-                        partition.pop(i2)
-                        assert mats0 == retract[mats2][0]
-                        g2 = retract[mats2][1]
-                        g = g0*g1
+                    assert mats0 == retract[mats2][0]
+                    g2 = retract[mats2][1]
+                    g = g0*g1
+                    if g != g2:
                         gens.append(~g2*g)
         if verbose:
             print("Stabilizer generators found")
