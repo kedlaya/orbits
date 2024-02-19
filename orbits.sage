@@ -177,7 +177,7 @@ class CayleyGroupRetract(GroupRetract):
                 stab_gens_in_G.append(self.G(h))
                 H = self.G.subgroup(stab_gens_in_G) 
                 order = H.order()
-                if H.order() == target_order: # Done!
+                if order == target_order: # Done!
                     stab_gens.append(h) # Don't forget the last generator
                     break
                 elif order == old_order: # No progress with this generator
