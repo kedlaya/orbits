@@ -145,7 +145,8 @@ class CayleyGroupRetract(GroupRetract):
         Compute a point stabilizer.
         
         If ``gens`` is ``True``, return a list of generators of the stabilizer instead,
-        in the format of ``optimized_rep``.
+        in the format of ``optimized_rep``; a list of the same generators as elements of the
+        ambient group; and the order of the stabilizer.
         """
         mats0, g0 = self[v]
         vertices = tuple(self.vertices())
@@ -155,16 +156,17 @@ class CayleyGroupRetract(GroupRetract):
         # Early abort for the trivial group.
         if target_order == 1:
             H = G.subgroup([])
-            return ([], [] if gens else H)
+            return ([], [], 1 if gens else H)
         # Produce random stabilizer elements until we hit the right order.
         stab_gens = []
         stab_gens_in_G = []
         d = self.d
+        orbit = [w for w in vertices if d[w][0] == mats0]
+        old_order = 1
         while True:
-            e1 = random.choice(vertices)
+            e1 = random.choice(orbit)
             mats1, g1 = d[e1]
-            if mats1 != mats0:
-                continue
+            assert mats1 == mats0
             rgen = random.choice(self.gens)
             e2 = self.apply_group_elem(rgen, e1)
             mats2, g2 = d[e2]
@@ -172,12 +174,18 @@ class CayleyGroupRetract(GroupRetract):
             g = rgen*g1
             if g != g2:
                 h = g0*~g2*g*~g0
-                stab_gens.append(h)
                 stab_gens_in_G.append(self.G(h))
                 H = self.G.subgroup(stab_gens_in_G) 
-                if H.order() == target_order:
-                     break
-        return (stab_gens, stab_gens_in_G if gens else H)
+                order = H.order()
+                if H.order() == target_order: # Done!
+                    stab_gens.append(h) # Don't forget the last generator
+                    break
+                elif order == old_order: # No progress with this generator
+                    stab_gens_in_G.pop()
+                else: # Record the progress we made
+                    stab_gens.append(h)
+                    old_order = order
+        return (stab_gens, stab_gens_in_G, target_order if gens else H)
 
 class OrbitLookupTree():
     r"""
@@ -315,7 +323,7 @@ class OrbitLookupTree():
             optimized_gens = [self.optimized_rep(g) for g in random_generating_sequence(G2)]
         else:
             retract = self[n-1][parent]['retract']
-            optimized_gens, gens = retract.stabilizer(endgen, gens=True)
+            optimized_gens, gens, G1_order = retract.stabilizer(endgen, gens=True)
         G2 = self.G.subgroup(gens + selfnmats['stab'][1])
         optimized_gens = optimized_gens + selfnmats['stab'][1]
 #        edges = [(i, mats.index(self.apply_group_elem(g, mats[i]))) for g in optimized_gens for i in range(n)]
