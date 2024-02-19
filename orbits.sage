@@ -79,6 +79,11 @@ class GroupRetract():
     representative and `g` is a group element satisfying `g(w) = v`. Any vertex sharing a
     component in a vertex in `exclude`, or for which `forbid` (if specified) returns `True`,
     is omitted.
+
+    The argument ``neighbors`` should be a dict whose value at `v` is a list of pairs
+    consisting of out-neighbors of `v` and edge labels. For efficiency, we assume that every
+    connected component of the digraph is strongly connected; otherwise, the reverse edges
+    should also be included.
     """
     def __init__(self, G, vertices, neighbors, exclude=[], forbid=None, optimized_rep=None):
         self.G = G
@@ -110,6 +115,9 @@ class GroupRetract():
     def __contains__(self, item):
         return (item in self.d)
 
+    def items(self):
+        return self.d.items()
+
     def vertices(self):
         return self.d.keys()
         
@@ -117,14 +125,18 @@ class GroupRetract():
         """
         Return an iterator over connected component representatives.
         """
-        for v, t in self.d.items():
+        for v, t in self.items():
             if t[0] == v:
                 yield v
 
 class CayleyGroupRetract(GroupRetract):
     """
     Specialized version of GroupRetract for full Cayley digraphs.
+<<<<<<< HEAD
     
+=======
+
+>>>>>>> fix2
     If ``gens`` is specified, it is assumed to be a list of elements of `G`.
     These do not have to generate `G`; however, if they do not, then `order` is assumed
     to be the order of the subgroup that they generate.
@@ -145,7 +157,8 @@ class CayleyGroupRetract(GroupRetract):
         Compute a point stabilizer.
         
         If ``gens`` is ``True``, return a list of generators of the stabilizer instead,
-        in the format of ``optimized_rep``.
+        in the format of ``optimized_rep``; a list of the same generators as elements of the
+        ambient group; and the order of the stabilizer.
         """
         mats0, g0 = self[v]
         vertices = tuple(self.vertices())
@@ -155,15 +168,17 @@ class CayleyGroupRetract(GroupRetract):
         # Early abort for the trivial group.
         if target_order == 1:
             H = G.subgroup([])
-            return ([] if gens else H)
+            return ([], [], 1 if gens else H)
         # Produce random stabilizer elements until we hit the right order.
         stab_gens = []
+        stab_gens_in_G = []
         d = self.d
+        orbit = [w for w in vertices if d[w][0] == mats0]
+        old_order = 1
         while True:
-            e1 = random.choice(vertices)
+            e1 = random.choice(orbit)
             mats1, g1 = d[e1]
-            if mats1 != mats0:
-                continue
+            assert mats1 == mats0
             rgen = random.choice(self.gens)
             e2 = self.apply_group_elem(rgen, e1)
             mats2, g2 = d[e2]
@@ -171,11 +186,18 @@ class CayleyGroupRetract(GroupRetract):
             g = rgen*g1
             if g != g2:
                 h = g0*~g2*g*~g0
-                stab_gens.append(self.G(h))
-                H = self.G.subgroup(stab_gens) 
-                if H.order() == target_order:
-                     break
-        return (stab_gens if gens else H)
+                stab_gens_in_G.append(self.G(h))
+                H = self.G.subgroup(stab_gens_in_G) 
+                order = H.order()
+                if order == target_order: # Done!
+                    stab_gens.append(h) # Don't forget the last generator
+                    break
+                elif order == old_order: # No progress with this generator
+                    stab_gens_in_G.pop()
+                else: # Record the progress we made
+                    stab_gens.append(h)
+                    old_order = order
+        return (stab_gens, stab_gens_in_G, target_order if gens else H)
 
 class OrbitLookupTree():
     r"""
@@ -199,19 +221,10 @@ class OrbitLookupTree():
         - ``optimized_rep``: converts an element of `G` into a representation expected by ``apply_group_elem``.
         - ``forbid``: on input of a tuple, returns ``True`` if the underlying set should be forbidden. This is assumed to be both
           invariant under both the `G`-action and permutation of the tuple.
-          
-        If ``linear`` is ``True``, we assume that ``vertices`` is a vector space over `\F_2` on which `G` acts linearly.
         """
         self.G = G
         self.G_order = G.order()
-        if linear:
-            self.V = vertices
-            self.vertices = list(vertices)
-            for v in self.vertices:
-                v.set_immutable()
-        else:
-            self.V = None
-            self.vertices = vertices
+        self.vertices = vertices
         if methods is None:
             methods = {}
         self.apply_group_elem = methods['apply_group_elem'] if 'apply_group_elem' in methods else (lambda g, x: g*x)
@@ -220,9 +233,9 @@ class OrbitLookupTree():
         self.forbid = methods['forbid'] if 'forbid' in methods else None
         self.identity = self.optimized_rep(G(1))
         S = set(self.vertices)
-        for g in G.gens():
-            gm = optimized_rep(g)
-            assert all(self.apply_group_elem(gm, x) in S for x in S)
+        self.G_gens = [self.optimized_rep(g) for g in random_generating_sequence(G)]
+        for g in self.G_gens:
+            assert all(self.apply_group_elem(g, x) in S for x in S)
         S0 = tuple()
         self.tree = {0: {S0: {'gpel': (S0, self.identity), 'stab': []}}}
         self.scratch = None
@@ -261,14 +274,8 @@ class OrbitLookupTree():
             assert 'retract' in self[n-1][mats0]
             y = self.apply_group_elem(~g0, mats[-1])
         z, g1 = self[n-1][mats0]['retract'][y]
-        if self.V:
-            M = Matrix(mats0 + (z,))
-            assert M.rank() == n
-            M = M.echelon_form()
-            mats1 = tuple(M.rows())
-        else:
-            assert z not in mats0
-            mats1 = mats0 + (z,)
+        assert z not in mats0
+        mats1 = mats0 + (z,)
         if not find_green:
             return mats1, g0*g1
         if 'gpel' not in self[n][mats1]:
@@ -302,7 +309,7 @@ class OrbitLookupTree():
         n = len(mats)
         selfnmats = self[n][mats]
         if n == 0:
-            selfnmats['stab'] = ([], self.G, self.G_order, [self.optimized_rep(g) for g in random_generating_sequence(self.G)])
+            selfnmats['stab'] = (self.G_order, self.G_gens)
             return None
         parent = mats[:-1]
         endgen = mats[-1]
@@ -310,39 +317,30 @@ class OrbitLookupTree():
         if self.stabilizer is not None:
             G1 = G0.intersection(self.stabilizer(endgen))
             gens = G1.gens()
+            optimized_gens = [self.optimized_rep(g) for g in random_generating_sequence(G1)]
         else:
             retract = self[n-1][parent]['retract']
-            gens = retract.stabilizer(endgen, gens=True)
-        G2 = self.G.subgroup(gens + selfnmats['stab'][1])
-        selfnmats['stab'] = (selfnmats['stab'][0], G2, G2.order(), [self.optimized_rep(g) for g in random_generating_sequence(G2)])
+            optimized_gens, gens, G1_order = retract.stabilizer(endgen, gens=True)
+        G2 = self.G.subgroup(gens + selfnmats['stab'])
+        optimized_gens = optimized_gens + selfnmats['stab']
+        selfnmats['stab'] = (G2.order(), optimized_gens)
 
     def construct_children(self, mats, verbose=False):
         """
         Construct the children of a green node using a Cayley group retract.
         """
         n = len(mats)
-        if self.V:
-            W = self.V.quotient(self.V.subspace(mats))
-            vertices = [W.lift(w) for w in W if w]
-            for w in vertices:
-                w.set_immutable()
-            apply_group_elem = lambda g, v, act=self.apply_group_elem, W=W: return_immutable(W.lift(W(act(g,v))))
-        else:
-            vertices = [M for M in self.vertices if M not in mats]
-            apply_group_elem = self.apply_group_elem
-        _, G1, order, gens = self[n][mats]['stab']
+        vertices = [M for M in self.vertices if M not in mats]
+        apply_group_elem = self.apply_group_elem
+        order, gens = self[n][mats]['stab']
         retract = CayleyGroupRetract(self.G, vertices, apply_group_elem, self.optimized_rep, gens=gens, order=order)
         self[n][mats]['retract'] = retract
         if verbose:
             print("Retract computed")
         for M in retract.reps():
             mats1 = mats + (M,)
-            if self.V:
-                if Matrix(mats1).rank() < n+1:
-                    raise ValueError("Found linearly dependent tuple")
-            else:
-                if M in mats:
-                    raise ValueError("Found repeated entry in tuple")
+            if M in mats:
+                raise ValueError("Found repeated entry in tuple")
             self[n+1][mats1] = {}
 
     def nodes_at_new_level(self, verbose=False):
@@ -356,14 +354,16 @@ class OrbitLookupTree():
         G = self.G
         check_count = 0
         for mats in self.green_nodes(n):
-            G1 = self.stabilizer_from_gens(mats)
+            self.stabilizer_from_gens(mats)
+            order, _ = self[n][mats]['stab']
             if verbose:
-                print("Stabilizer computed")
-            if not self.V and not self.forbid:
-                check_count += self.G_order // G1.order()
+                print("Stabilizer computed: order {}".format(order))
+            if not self.forbid:
+                assert self.G_order % order == 0
+                check_count += self.G_order // order
             self.construct_children(mats, verbose)
         # If no forbidden vertices, check the orbit-stabilizer formula.
-        if not self.V and not self.forbid:
+        if not self.forbid:
             if check_count != binomial(len(self.vertices), n):
                 raise RuntimeError("Error in orbit-stabilizer formula")
 
@@ -375,27 +375,10 @@ class OrbitLookupTree():
         exclude = []
         n = self.depth()
         edges = {mats: [] for mats in self[n]}
-        if self.V:
-            W = VectorSpace(GF(2), n-1)
         if verbose:
             print("Number of new nodes: {}".format(len(self[n])))
         for mats in self[n]:
-            if self.V:
-                tmp = []
-                for v in W:
-                   tmp.append(tuple(mats[i]+(v[i] if i<n-1 else 0)*mats[n-1] for i in range(n)))
-                for v in W:
-                    if v:
-                        i = v.support()[0]
-                        tmp2 = [(v[j]*mats[n-1] if j<n-1 else 0) for j in range(n)]
-                        for j in range(n-1):
-                            tmp2[j if j<i else j+1] += mats[j]
-                        tmp.append(tuple(tmp2))
-                for mats1 in tmp:
-                    for v in mats1:
-                        v.set_immutable()
-            else:
-                tmp = [tuple(mats[n-1 if i==j else j if i==n-1 else i] for i in range(n)) for j in range(n-1)]
+            tmp = [tuple(mats[n-1 if i==j else j if i==n-1 else i] for i in range(n)) for j in range(n-1)]
             tmp2 = [self.orbit_rep_recursive(i, n, find_green=False) for i in tmp]
             if any(i[0] is None for i in tmp2):
                 exclude.append(mats)
@@ -404,7 +387,7 @@ class OrbitLookupTree():
                 for j in range(n-1):
                     mats1, g1 = tmp2[j]
                     edges[mats1].append((mats, g1, j))
-                    edges[mats].append((mats1, ~g1, j))
+                    edges[mats].append((mats1, ~g1, None))
         if verbose:
             print("Edges computed")
         neighbors = lambda M, edges=edges: edges[M]
@@ -431,19 +414,17 @@ class OrbitLookupTree():
         n = self.depth()
         edges, retract = self.scratch
         selfn = self[n]
-        for mats1 in edges:
-            if mats1 in retract:
+        for mats1 in self.green_nodes(n):
                 mats0, g1 = retract[mats1]
-                partition, gens = selfn[mats0]['stab']
+                assert mats0 == mats1
+                gens = selfn[mats0]['stab']
                 for mats2, g0, j in edges[mats1]:
-                    i1 = min(i for i in range(len(partition)) if n-1 in partition[i])
-                    i2 = min(i for i in range(len(partition)) if j in partition[i])
-                    if i1 != i2:
-                        assert mats0 == retract[mats2][0]
-                        g2 = retract[mats2][1]
-                        g = g0*g1
-                        partition[i1] = partition[i1] + partition[i2]
-                        partition.pop(i2)
+                    if j is None:
+                        continue
+                    assert mats0 == retract[mats2][0]
+                    g2 = retract[mats2][1]
+                    g = g0*g1
+                    if g != g2:
                         gens.append(~g2*g)
         if verbose:
             print("Stabilizer generators found")
