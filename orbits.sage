@@ -120,7 +120,7 @@ class GroupRetract():
 
     def vertices(self):
         return self.d.keys()
-        
+
     def reps(self):
         """
         Return an iterator over connected component representatives.
@@ -166,33 +166,38 @@ class CayleyGroupRetract(GroupRetract):
             H = G.subgroup([])
             return ([], [], 1 if gens else H)
         # Produce random stabilizer elements until we hit the right order.
-        stab_gens = []
-        stab_gens_in_G = []
         d = self.d
         orbit = [w for w in vertices if d[w][0] == mats0]
+
+        def random_gen():
+            while True:
+                e1 = random.choice(orbit)
+                mats1, g1 = d[e1]
+                assert mats1 == mats0
+                rgen = random.choice(self.gens)
+                e2 = self.apply_group_elem(rgen, e1)
+                mats2, g2 = d[e2]
+                assert mats2 == mats0
+                g = rgen*g1
+                if g != g2:
+                    return g0*~g2*g*~g0
+  
+        stab_gens = []
+        stab_gens_in_G = []
         old_order = 1
         while True:
-            e1 = random.choice(orbit)
-            mats1, g1 = d[e1]
-            assert mats1 == mats0
-            rgen = random.choice(self.gens)
-            e2 = self.apply_group_elem(rgen, e1)
-            mats2, g2 = d[e2]
-            assert mats2 == mats0
-            g = rgen*g1
-            if g != g2:
-                h = g0*~g2*g*~g0
-                stab_gens_in_G.append(self.G(h))
-                H = self.G.subgroup(stab_gens_in_G) 
-                order = H.order()
-                if order == target_order: # Done!
-                    stab_gens.append(h) # Don't forget the last generator
-                    break
-                elif order == old_order: # No progress with this generator
-                    stab_gens_in_G.pop()
-                else: # Record the progress we made
-                    stab_gens.append(h)
-                    old_order = order
+            h = random_gen()
+            stab_gens_in_G.append(self.G(h))
+            H = self.G.subgroup(stab_gens_in_G) 
+            order = H.order()
+            if order == target_order: # Done!
+                stab_gens.append(h) # Don't forget the last generator
+                break
+            elif order == old_order: # No progress with this generator
+                stab_gens_in_G.pop()
+            else: # Record the progress we made
+                stab_gens.append(h)
+                old_order = order
         return (stab_gens, stab_gens_in_G, target_order if gens else H)
 
 class OrbitLookupTree():
