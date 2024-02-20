@@ -187,12 +187,13 @@ class OrbitLookupTree():
         r"""
         The entries of ``methods`` (all optional):
         
-        - ``apply_group_elem``: on input of a group element `g` and a vertex `x`, returns the action of `g` on `x`.
-          Defaults to ``g*x``.
-        - ``stabilizer``: on input of a vertex `x`, returns a group whose intersection with `G` is the stabilizer of `x`.
-        - ``optimized_rep``: converts an element of `G` into a representation expected by ``apply_group_elem``.
-        - ``forbid``: on input of a tuple, returns ``True`` if the underlying set should be forbidden. This is assumed to be both
-          invariant under both the `G`-action and permutation of the tuple.
+        - ``apply_group_elem``: on input of a group element `g` and a vertex `x`, returns 
+          the action of `g` on `x`. Defaults to ``g*x``.
+        - ``optimized_rep``: converts an element of `G` into a representation expected 
+          by ``apply_group_elem``.
+        - ``forbid``: on input of a tuple, returns ``True`` if the underlying set should 
+          be forbidden. This is assumed to be both invariant under both the `G`-action and
+          permutation of the tuple, but not necessarily under passage to a superset.
         """
         self.G = G
         self.G_order = G.order()
@@ -200,7 +201,6 @@ class OrbitLookupTree():
         if methods is None:
             methods = {}
         self.apply_group_elem = methods['apply_group_elem'] if 'apply_group_elem' in methods else (lambda g, x: g*x)
-        self.stabilizer = methods['stabilizer'] if 'stabilizer' in methods else None
         self.optimized_rep = methods['optimized_rep'] if 'optimized_rep' in methods else (lambda g: g)
         self.forbid = methods['forbid'] if 'forbid' in methods else None
         self.identity = self.optimized_rep(G(1))
@@ -286,17 +286,10 @@ class OrbitLookupTree():
         parent = mats[:-1]
         endgen = mats[-1]
         G0 = self[n-1][parent]['stab']
-        if self.stabilizer is not None:
-            G1 = G0.intersection(self.stabilizer(endgen))
-            gens = G1.gens()
-            optimized_gens = [self.optimized_rep(g) for g in random_generating_sequence(G1)]
-            G2 = G.subgroup(gens + selfnmats['stab'])
-            selfnmats['stab'] = (G2.order(), optimized_gens + selfnmats['stab'])
-        else:
-            retract = self[n-1][parent]['retract']
-            _, optimized_gens, G1_gap = retract.stabilizer_gens(endgen)
-            order = G1_gap.ClosureGroup(selfnmats['stab']).Size().sage()
-            selfnmats['stab'] = (order, optimized_gens + selfnmats['stab'])
+        retract = self[n-1][parent]['retract']
+        _, optimized_gens, G1_gap = retract.stabilizer_gens(endgen)
+        order = G1_gap.ClosureGroup(selfnmats['stab']).Size().sage()
+        selfnmats['stab'] = (order, optimized_gens + selfnmats['stab'])
 
     def construct_children(self, mats, verbose=False):
         """
