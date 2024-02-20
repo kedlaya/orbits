@@ -34,6 +34,25 @@ def random_generating_sequence(G):
             l.append(G.random_element())
         return l
 
+class GroupAction():
+    """
+    Action of a finite group on a finite set.
+    """
+    def __init__(self, G, vertices):
+        self.G = G
+        self.vertices = vertices
+        # Check closure under the action.
+        S = set(self.vertices)
+        self.G_gens = [self.optimized_rep(g) for g in random_generating_sequence(G)]
+        for g in self.G_gens:
+            assert all(self.action(g, x) in S for x in S)
+        
+    def action(self, g, v):
+        return g*v
+        
+    def optimized_rep(self, g):
+        return g
+
 class GroupRetract():
     """
     Group retract object associated to a group action and a partial Cayley digraph.
@@ -239,6 +258,8 @@ class OrbitLookupTree():
     def orbit_rep(self, mats):
         """
         Find the orbit representative for a given tuple.
+        
+        The output consists of a pair ``(mats1, g)`` such that the action of `g` on `mats` gives `mats`.
         """
         n = len(mats)
         if n not in self:
@@ -319,66 +340,36 @@ class OrbitLookupTree():
         """
         exclude = []
         n = self.depth()
-        edges = {mats: [] for mats in self[n]}
-        for mats in edges:
+        selfn = self[n]
+        for mats in list(selfn.keys()):
+            if mats not in selfn or 'gpel' in selfn[mats]:
+                continue
             tmp = [tuple(mats[n-1 if i==j else j if i==n-1 else i] for i in range(n)) for j in range(n-1)]
             tmp2 = [self.orbit_rep_recursive(i, n, find_green=False) for i in tmp]
             if any(i[0] is None for i in tmp2):
-                exclude.append(mats)
-                exclude.extend(j[0] for j in tmp2 if j[0] is not None)
+                for j in [(mats, None)] + tmp2:
+                    if j[0] is not None:
+                        del selfn[j[0]]
             else:
-                for j in range(n-1):
-                    mats1, g1 = tmp2[j]
-                    edges[mats1].append((mats, g1, j))
-                    edges[mats].append((mats1, ~g1, None))
-        if verbose:
-            print("Edges computed")
-        neighbors = lambda M, edges=edges: edges[M]
-        retract = GroupRetract(self.G, self[n].keys(), neighbors, exclude, self.forbid, optimized_rep=self.optimized_rep)
+                selfn[mats]['gpel'] = (mats, self.identity)
+                selfn[mats]['stab'] = []
+                for mats1, g1 in tmp2:
+                    if mats1 == mats:
+                        selfn[mats]['stab'].append(g1)
+                    else:
+                        selfn[mats1]['gpel'] = (mats, ~g1)
         if verbose:
             print("Retract computed")
-        # Mark nodes as green or red, and record group elements.
-        for mats in retract:
-            t = retract[mats]
-            self[n][mats]['gpel'] = t
-            if t[0] == mats:
-                self[n][mats]['stab'] = []
-        assert all('stab' in self[n][self[n][mats]['gpel'][0]] for mats in self[n] if 'gpel' in self[n][mats])
-        self.scratch = (edges, retract)
         if verbose:
             print("Number of new green nodes: {}".format(sum(1 for _ in self.green_nodes(n))))
             print("New level: {}".format(n))
             print()
 
-    def stabilizer_gens(self, verbose=False):
-        """
-        Compute stabilizer generators from a group retract.
-        """
-        n = self.depth()
-        edges, retract = self.scratch
-        selfn = self[n]
-        for mats1 in self.green_nodes(n):
-            mats0, g1 = retract[mats1]
-            assert mats0 == mats1
-            gens = selfn[mats0]['stab']
-            for mats2, g0, j in edges[mats1]:
-                if j is not None: # Ignore backwards edges
-                    assert mats0 == retract[mats2][0]
-                    g2 = retract[mats2][1]
-                    g = g0*g1
-                    if g != g2:
-                        gens.append(~g2*g)
-        if verbose:
-            print("Stabilizer generators found")
-        self.scratch = None
-        
     def extend(self, n, verbose=False):
         r"""
         Extend the tree to a new depth.
         """
         while self.depth() < n:
-            if self.scratch:
-                self.stabilizer_gens(verbose)
             self.nodes_at_new_level(verbose)
             self.classify_nodes(verbose)
 
