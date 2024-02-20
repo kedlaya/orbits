@@ -1,5 +1,4 @@
 import random
-from collections import deque
 load("bfs.pyx")
 
 def return_immutable(v):
