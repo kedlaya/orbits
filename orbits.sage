@@ -209,7 +209,6 @@ class OrbitLookupTree():
             assert all(self.action(g, x) in S for x in S)
         S0 = tuple()
         self.tree = {0: {S0: {'gpel': (S0, self.identity), 'stab': []}}}
-        self.scratch = None
 
     def __getitem__(self, key):
         return self.tree[key]
@@ -341,15 +340,15 @@ class OrbitLookupTree():
         exclude = []
         n = self.depth()
         selfn = self[n]
-        for mats in list(selfn.keys()):
-            if mats not in selfn or 'gpel' in selfn[mats]:
+        for mats in selfn:
+            if 'gpel' in selfn[mats]:
                 continue
             tmp = [tuple(mats[n-1 if i==j else j if i==n-1 else i] for i in range(n)) for j in range(n-1)]
             tmp2 = [self.orbit_rep_recursive(i, n, find_green=False) for i in tmp]
-            if any(i[0] is None for i in tmp2):
-                for j in [(mats, None)] + tmp2:
-                    if j[0] is not None:
-                        del selfn[j[0]]
+            if any(i[0] is None for i in tmp2) or (self.forbid and self.forbid(mats)):
+                for (j, _) in tmp2:
+                    if j is not None:
+                        selfn[j]['gpel'] = None
             else:
                 selfn[mats]['gpel'] = (mats, self.identity)
                 selfn[mats]['stab'] = []
@@ -358,6 +357,10 @@ class OrbitLookupTree():
                         selfn[mats]['stab'].append(g1)
                     else:
                         selfn[mats1]['gpel'] = (mats, ~g1)
+        if self.forbid:
+            for mats in list(selfn.keys()):
+                if 'gpel' in selfn[mats] and selfn[mats]['gpel'] is None:
+                    del selfn[mats]['gpel']
         if verbose:
             print("Retract computed")
         if verbose:
