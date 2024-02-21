@@ -6,9 +6,9 @@ def dfs(neighbors, dict d, v0):
         c += 1
         w, t = queue.pop()
         for u in neighbors(w):
-            (x, g) = u[:2]
+            (x, g) = u
             if x not in d:
-                u = (t[0], g*t[1])
+                u = (t[0], g*t[1], None)
                 d[x] = u
                 queue.append((x, u))
                 count += 1

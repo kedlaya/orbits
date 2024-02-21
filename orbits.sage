@@ -34,28 +34,9 @@ def random_generating_sequence(G):
             l.append(G.random_element())
         return l
 
-class GroupAction():
+class CayleyGroupRetract():
     """
-    Action of a finite group on a finite set.
-    """
-    def __init__(self, G, vertices):
-        self.G = G
-        self.vertices = vertices
-        # Check closure under the action.
-        S = set(self.vertices)
-        self.G_gens = [self.optimized_rep(g) for g in random_generating_sequence(G)]
-        for g in self.G_gens:
-            assert all(self.action(g, x) in S for x in S)
-        
-    def action(self, g, v):
-        return g*v
-        
-    def optimized_rep(self, g):
-        return g
-
-class GroupRetract():
-    """
-    Group retract object associated to a group action and a partial Cayley digraph.
+    Group retract object associated to a group action and a Cayley digraph.
     
     The underlying dict is stored as the attribute ``d``, but one can also index directly.
     For a vertex `v`, the value at `v` is a pair `(w,g)` where `w` is a connected component
@@ -63,30 +44,32 @@ class GroupRetract():
     component in a vertex in `exclude`, or for which `forbid` (if specified) returns `True`,
     is omitted.
 
-    The argument ``neighbors`` should be a dict whose value at `v` is a list of pairs
-    consisting of out-neighbors of `v` and edge labels. For efficiency, we assume that every
-    connected component of the digraph is strongly connected; otherwise, the reverse edges
-    should also be included.
+    If ``gens`` is specified, it is assumed to be a list of elements of `G`.
+    These do not have to generate `G`; however, if they do not, then `order` is assumed
+    to be the order of the subgroup that they generate.
     """
-    def __init__(self, G, vertices, neighbors, exclude=[], forbid=None, optimized_rep=None):
+    def __init__(self, G, vertices, action, optimized_rep=None, debug=False, order=None, gens=None):
         self.G = G
-        vertices = list(vertices)
+        self.vertices = list(vertices)
+        self.action = action
         self.optimized_rep = optimized_rep if optimized_rep else (lambda g: g)
-        # Conduct a breadth-first search, identifying forbidden vertices.
+        self.gens = [self.optimized_rep(g) for g in random_generating_sequence(G)] if gens is None else gens
+        if debug:
+            vertex_set = set(vertices)
+            assert all(action(g, v) in vertex_set for g in self.gens for v in vertex_set)
+        self.G_order = G.order() if order is None else order
+
+        # Conduct a breadth-first search.
         d = {}
         iden = self.optimized_rep(G(1))
-        forbidden_reps = set()
         self.orbit_len = {}
-        for v in vertices:
+        neighbors = lambda M, action=self.action, gens=self.gens: ((action(g, M), g) for g in gens)
+        for v in self.vertices:
             if v not in d:
-                if forbid and forbid(v):
-                    forbidden_reps.add(v)
-                d[v] = (v, iden)
-                self.orbit_len[v] = dfs(neighbors, d, v)
-        # Identify orbit representatives of excluded vertices.
-        forbidden_reps.update(d[v][0] for v in exclude)
-        # Remove forbidden and excluded orbits.
-        self.d = {v: d[v] for v in d if d[v][0] not in forbidden_reps} if forbidden_reps else d
+                d[v] = (v, iden, 0)
+                orbit_len = dfs(neighbors, d, v)
+                d[v] = (v, iden, orbit_len)
+        self.d = d
 
     def __getitem__(self, key):
         return self.d[key]
@@ -111,35 +94,17 @@ class GroupRetract():
             if t[0] == v:
                 yield v
 
-class CayleyGroupRetract(GroupRetract):
-    """
-    Specialized version of GroupRetract for full Cayley digraphs.
-
-    If ``gens`` is specified, it is assumed to be a list of elements of `G`.
-    These do not have to generate `G`; however, if they do not, then `order` is assumed
-    to be the order of the subgroup that they generate.
-    """
-    def __init__(self, G, vertices, action, optimized_rep=None, debug=False, order=None, gens=None):
-        self.action = action
-        self.optimized_rep = optimized_rep if optimized_rep else (lambda g: g)
-        self.gens = [self.optimized_rep(g) for g in random_generating_sequence(G)] if gens is None else gens
-        if debug:
-            vertex_set = set(vertices)
-            assert all(action(g, v) in vertex_set for g in self.gens for v in vertex_set)
-        neighbors = lambda M, action=action, gens=self.gens: ((action(g, M), g) for g in gens)
-        self.G_order = G.order() if order is None else order
-        GroupRetract.__init__(self, G, vertices, neighbors, optimized_rep=optimized_rep)
-
     def stabilizer(self, v, gap=False):
         """
         Compute a point stabilizer.
         
         Set ``gap=True`` to return a GAP group.
         """
-        mats0, g0 = self[v]
+        mats0, g0, _ = self[v]
 
         # Use the orbit-stabilizer formula to compute the stabilizer order.
-        target_order = ZZ(self.G_order / self.orbit_len[mats0])
+        orbit_len = self[mats0][2]
+        target_order = ZZ(self.G_order / orbit_len)
         H = G.subgroup([]).gap()
 
         # Early abort for the trivial group.
@@ -147,16 +112,16 @@ class CayleyGroupRetract(GroupRetract):
             return H if gap else G.subgroup([])
 
         d = self.d
-        orbit = [w for w in self.vertices() if d[w][0] == mats0]
+        orbit = [w for w in self.vertices if d[w][0] == mats0]
         order = 1
         while order < target_order:
             # Produce random stabilizer elements until we hit the right order.
             e1 = random.choice(orbit)
-            mats1, g1 = d[e1]
+            mats1, g1, _ = d[e1]
             assert mats1 == mats0
             rgen = random.choice(self.gens)
             e2 = self.action(rgen, e1)
-            mats2, g2 = d[e2]
+            mats2, g2, _ = d[e2]
             assert mats2 == mats0
             g = rgen*g1
             if g == g2: # Don't bother with the identity element
@@ -243,7 +208,7 @@ class OrbitLookupTree():
                 return None, None
             assert 'gpel' in self[n-1][mats0]
             y = self.action(~g0, mats[-1])
-        z, g1 = self[n-1][mats0]['retract'][y]
+        z, g1, _ = self[n-1][mats0]['retract'][y]
         assert z not in mats0
         mats1 = mats0 + (z,)
         if not find_green:
@@ -337,7 +302,6 @@ class OrbitLookupTree():
         """
         Classify nodes at the last level of the tree.
         """
-        exclude = []
         n = self.depth()
         selfn = self[n]
         for mats in selfn:
@@ -354,15 +318,13 @@ class OrbitLookupTree():
                 selfn[mats]['stab'] = []
                 for mats1, g1 in tmp2:
                     if mats1 == mats:
-                        selfn[mats]['stab'].append(g1)
+                        selfn[mats]['stab'].append(g1) # Stabilizer element
                     else:
                         selfn[mats1]['gpel'] = (mats, ~g1)
         if self.forbid:
             for mats in list(selfn.keys()):
                 if 'gpel' in selfn[mats] and selfn[mats]['gpel'] is None:
                     del selfn[mats]['gpel']
-        if verbose:
-            print("Retract computed")
         if verbose:
             print("Number of new green nodes: {}".format(sum(1 for _ in self.green_nodes(n))))
             print("New level: {}".format(n))
