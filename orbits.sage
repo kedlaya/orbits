@@ -159,21 +159,30 @@ class OrbitLookupTree():
         """
         self.G = G
         self.G_order = G.order()
-        self.vertices = vertices
-    
+        self.linear = linear
+        
         if methods is None:
             methods = {}
         self.action = methods['action'] if 'action' in methods else methods['apply_group_elem'] if 'apply_group_elem' in methods else (lambda g, x: g*x)
         self.optimized_rep = methods['optimized_rep'] if 'optimized_rep' in methods else (lambda g: g)
         self.forbid = methods['forbid'] if 'forbid' in methods else None
         self.identity = self.optimized_rep(G(1))
+        S0 = tuple()
+        self.tree = {0: {S0: {'gpel': (S0, self.identity), 'stab': []}}}
+
+        if self.linear:
+            self.V = vertices
+            self.vertices = list(vertices)
+            for v in self.vertices:
+                v.set_immutable()
+            self[0][S0]['quot'] = self.V
+        else:
+            self.vertices = vertices
 
         S = set(self.vertices)
         self.G_gens = [self.optimized_rep(g) for g in random_generating_sequence(G)]
         for g in self.G_gens:
             assert all(self.action(g, x) in S for x in S)
-        S0 = tuple()
-        self.tree = {0: {S0: {'gpel': (S0, self.identity), 'stab': []}}}
 
     def __getitem__(self, key):
         return self.tree[key]
@@ -204,10 +213,13 @@ class OrbitLookupTree():
             assert y not in mats0
         else: # Truncation needs to be resolved
             mats0, g0 = self.orbit_rep_recursive(mats0, n-1)
-            if mats0 is None:
+            if mats0 is None: # Found an ineligible node
                 return None, None
             assert 'gpel' in self[n-1][mats0]
             y = self.action(~g0, mats[-1])
+        if self.linear: # Canonicalize quotient representative
+            y = self[n-1][mats0]['quot'].lift(y)
+            y.set_immutable()
         z, g1, _ = self[n-1][mats0]['retract'][y]
         assert z not in mats0
         mats1 = mats0 + (z,)
@@ -261,9 +273,21 @@ class OrbitLookupTree():
         Construct the children of a green node using a Cayley group retract.
         """
         n = len(mats)
-        vertices = [M for M in self.vertices if M not in mats]
-        action = self.action
-        order, gens = self[n][mats]['stab']
+        order, gens = self[n][mats]['stab']        
+        if self.linear: # Action on nonzero elements of the quotient space
+            quot = self.V.quotient(self.V.subspace(mats))
+            self[n][mats]['quot'] = quot
+            vertices = list(quot.lift(v) for v in quot if v)
+            for v in vertices:
+                v.set_immutable()
+            # Construct action map on the quotient.
+            def action(g, x, action=self.action, quot=quot):
+                y = quot.lift(action(g,x))
+                y.set_immutable()
+                return y                
+        else:
+            vertices = [M for M in self.vertices if M not in mats]
+            action = self.action
         retract = CayleyGroupRetract(self.G, vertices, action, self.optimized_rep, gens=gens, order=order)
         self[n][mats]['retract'] = retract
         for M in retract.reps():
@@ -293,7 +317,12 @@ class OrbitLookupTree():
                 print("Constructed children of a node with stabilizer order {}".format(order))
         # If no forbidden vertices, check the orbit-stabilizer formula.
         if not self.forbid:
-            if check_count != binomial(len(self.vertices), n):
+            if self.linear:
+                dim = self.V.dimension()
+                predicted_count = prod(2**(dim-i)-1 for i in range(n)) // prod(2**(n-i)-1 for i in range(n))
+            else:
+                predicted_count = binomial(len(self.vertices), n)
+            if check_count != predicted_count:
                 raise RuntimeError("Error in orbit-stabilizer formula")
         if verbose:
             print("Number of new nodes: {}".format(len(self[n+1])))
@@ -304,10 +333,33 @@ class OrbitLookupTree():
         """
         n = self.depth()
         selfn = self[n]
+        transporters = []
+        if self.linear: # Construct transporters for action of GL(n, F_2) on P^{n-1}(F_2)
+            W = VectorSpace(GF(2), n)
+            for w in W:
+                if not w[:n-1]:
+                    continue
+                pos = min(i for i in range(n-1) if w[i])
+                M1 = identity_matrix(GF(2), n)
+                M1[pos,pos] = 0
+                M1[n-1,pos] = 1
+                for i in range(n):
+                    M1[i,n-1] = w[i]
+                M1 = ~M1
+                transporters.append(M1)
+        else: # Construct transporters for action of S_n on {1,...,n}
+            for j in range(n-1):
+                transporters.append(tuple(n-1 if i==j else j if i==n-1 else i for i in range(n)))
         for mats in selfn:
             if 'gpel' in selfn[mats]:
                 continue
-            tmp = [tuple(mats[n-1 if i==j else j if i==n-1 else i] for i in range(n)) for j in range(n-1)]
+            if self.linear:
+                tmp = [tuple(sum(t[i,j]*mats[j] for j in range(n)) for i in range(n)) for t in transporters]
+                for i in tmp:
+                    for j in i:
+                        j.set_immutable()
+            else:
+                tmp = [tuple(mats[t[i]] for i in range(n)) for t in transporters]
             tmp2 = [self.orbit_rep_recursive(i, n, find_green=False) for i in tmp]
             if any(i[0] is None for i in tmp2) or (self.forbid and self.forbid(mats)):
                 for (j, _) in tmp2:
