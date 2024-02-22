@@ -168,7 +168,7 @@ class OrbitLookupTree():
         self.forbid = methods['forbid'] if 'forbid' in methods else None
         self.identity = self.optimized_rep(G(1))
         S0 = tuple()
-        self.tree = {0: {S0: {'gpel': (S0, self.identity), 'stab': []}}}
+        self.tree = {0: {S0: {'gpel': (S0, self.identity), 'stab': (0, [])}}}
 
         if self.linear:
             self.V = vertices
@@ -258,12 +258,14 @@ class OrbitLookupTree():
         """
         n = len(mats)
         selfnmats = self[n][mats]
+        if selfnmats['stab'][0] > 0: # Already computed
+            return None
         if n == 0:
             selfnmats['stab'] = (self.G_order, self.G_gens)
             return None
         retract = self[n-1][mats[:-1]]['retract']
         G1_gap = retract.stabilizer(mats[-1], gap=True)
-        G2_gap = G1_gap.ClosureGroup(selfnmats['stab'])
+        G2_gap = G1_gap.ClosureGroup(selfnmats['stab'][1])
         order = G2_gap.Size().sage()
         optimized_gens = [self.optimized_rep(g) for g in G2_gap.SmallGeneratingSet()]
         selfnmats['stab'] = (order, optimized_gens)
@@ -278,11 +280,12 @@ class OrbitLookupTree():
             quot = self.V.quotient(self.V.subspace(mats))
             self[n][mats]['quot'] = quot
             vertices = list(quot.lift(v) for v in quot if v)
+            section = quot.lift_map()*quot.quotient_map()
             for v in vertices:
                 v.set_immutable()
             # Construct action map on the quotient.
-            def action(g, x, action=self.action, quot=quot):
-                y = quot.lift(action(g,x))
+            def action(g, x, action=self.action, section=section):
+                y = section(action(g,x))
                 y.set_immutable()
                 return y                
         else:
@@ -367,10 +370,10 @@ class OrbitLookupTree():
                         selfn[j]['gpel'] = None
             else:
                 selfn[mats]['gpel'] = (mats, self.identity)
-                selfn[mats]['stab'] = []
+                selfn[mats]['stab'] = (0, [])
                 for mats1, g1 in tmp2:
                     if mats1 == mats:
-                        selfn[mats]['stab'].append(g1) # Stabilizer element
+                        selfn[mats]['stab'][1].append(g1) # Stabilizer element
                     else:
                         selfn[mats1]['gpel'] = (mats, ~g1)
         if self.forbid:
