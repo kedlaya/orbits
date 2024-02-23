@@ -218,7 +218,7 @@ class OrbitLookupTree():
             assert 'gpel' in self[n-1][mats0]
             y = self.action(~g0, mats[-1])
         if self.linear: # Canonicalize quotient representative
-            y = self[n-1][mats0]['quot'].lift(y)
+            y = self[n-1][mats0]['quot'](y)
             y.set_immutable()
         z, g1, _ = self[n-1][mats0]['retract'][y]
         assert z not in mats0
@@ -278,16 +278,20 @@ class OrbitLookupTree():
         order, gens = self[n][mats]['stab']        
         if self.linear: # Action on nonzero elements of the quotient space
             quot = self.V.quotient(self.V.subspace(mats))
-            self[n][mats]['quot'] = quot
-            vertices = list(quot.lift(v) for v in quot if v)
-            section = quot.lift_map()*quot.quotient_map()
+            lift_map = quot.lift_map()
+            vertices = list(lift_map(v) for v in quot if v)
             for v in vertices:
                 v.set_immutable()
-            # Construct action map on the quotient.
-            def action(g, x, action=self.action, section=section):
-                y = section(action(g,x))
+            section_map = lift_map*quot.quotient_map()
+            section_on_basis = [section_map(v) for v in self.V.basis()]
+            def section(x, section_on_basis=section_on_basis, V=self.V):
+                y = V(0)
+                for a,b in zip(V.coordinates(x), section_on_basis):
+                    y += a*b
                 y.set_immutable()
                 return y                
+            self[n][mats]['quot'] = section
+            action = lambda g, x, section=section: section(self.action(g, x))
         else:
             vertices = [M for M in self.vertices if M not in mats]
             action = self.action
