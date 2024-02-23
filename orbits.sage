@@ -220,7 +220,11 @@ class OrbitLookupTree():
         if self.linear: # Canonicalize quotient representative
             y = self[n-1][mats0]['quot'](y)
             y.set_immutable()
-        z, g1, _ = self[n-1][mats0]['retract'][y]
+        if self[n-1][mats0]['stab'][0] == 1: # Trivial stabilizer, no retract needed
+            g1 = self.identity
+            z = y
+        else:
+            z, g1, _ = self[n-1][mats0]['retract'][y]
         assert z not in mats0
         mats1 = mats0 + (z,)
         if not find_green:
@@ -263,8 +267,12 @@ class OrbitLookupTree():
         if n == 0:
             selfnmats['stab'] = (self.G_order, self.G_gens)
             return None
-        retract = self[n-1][mats[:-1]]['retract']
-        G1_gap = retract.stabilizer(mats[-1], gap=True)
+        parent = mats[:-1]
+        if self[n-1][parent]['stab'][0] == 1: # Parent has trivial stabilizer
+            G1_gap = G.subgroup([]).gap()
+        else:
+            retract = self[n-1][mats[:-1]]['retract']
+            G1_gap = retract.stabilizer(mats[-1], gap=True)
         G2_gap = G1_gap.ClosureGroup(selfnmats['stab'][1])
         order = G2_gap.Size().sage()
         optimized_gens = [self.optimized_rep(g) for g in G2_gap.SmallGeneratingSet()]
@@ -278,26 +286,27 @@ class OrbitLookupTree():
         order, gens = self[n][mats]['stab']        
         if self.linear: # Action on nonzero elements of the quotient space
             quot = self.V.quotient(self.V.subspace(mats))
-            lift_map = quot.lift_map()
-            vertices = list(lift_map(v) for v in quot if v)
+            lifts = [quot.lift(v) for v in quot.basis()]
+            W = VectorSpace(GF(2), quot.dimension())
+            vertices = [sum(i*j for i,j in zip(lifts, W.coordinates(w))) for w in W if w]
             for v in vertices:
                 v.set_immutable()
-            section_map = lift_map*quot.quotient_map()
-            section_on_basis = [section_map(v) for v in self.V.basis()]
+            section_on_basis = [quot.lift(quot(v)) for v in self.V.basis()]
             def section(x, section_on_basis=section_on_basis, V=self.V):
                 y = V(0)
                 for a,b in zip(V.coordinates(x), section_on_basis):
                     y += a*b
                 y.set_immutable()
-                return y                
+                return y       
             self[n][mats]['quot'] = section
-            action = lambda g, x, section=section: section(self.action(g, x))
+            action = lambda g, x, section=section, action=self.action: section(action(g, x))
         else:
             vertices = [M for M in self.vertices if M not in mats]
             action = self.action
-        retract = CayleyGroupRetract(self.G, vertices, action, self.optimized_rep, gens=gens, order=order)
-        self[n][mats]['retract'] = retract
-        for M in retract.reps():
+        if order > 1:
+            retract = CayleyGroupRetract(self.G, vertices, action, self.optimized_rep, gens=gens, order=order)
+            self[n][mats]['retract'] = retract
+        for M in (vertices if order == 1 else retract.reps()):
             mats1 = mats + (M,)
             if M in mats:
                 raise ValueError("Found repeated entry in tuple")
@@ -355,8 +364,7 @@ class OrbitLookupTree():
                 M1 = ~M1
                 transporters.append(M1)
         else: # Construct transporters for action of S_n on {1,...,n}
-            for j in range(n-1):
-                transporters.append(tuple(n-1 if i==j else j if i==n-1 else i for i in range(n)))
+            transporters = [tuple(n-1 if i==j else j if i==n-1 else i for i in range(n)) for j in range(n-1)]
         for mats in selfn:
             if 'gpel' in selfn[mats]:
                 continue
