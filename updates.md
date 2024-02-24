@@ -1,7 +1,10 @@
 # Updates
 
-We document here some changes to this code relative to [the original version found here](https://www.github.com/kedlaya/same-class-number).
+We document here some changes to this code relative to [the original version found here](https://www.github.com/kedlaya/same-class-number). See also [this writeup](https://github.com/kedlaya/orbits/blob/main/orbits.pdf).
 
--  The class `GroupRetract` and subclass `CayleyGroupRetract` have been introduced. The latter includes the function `stabilizer`; as a result, specifying a function `stabilizer` function when creating an orbit lookup tree is now optional (but still supported).
+-  The class `CayleyGroupRetract` have been introduced to solve the orbit-stabilizer problem for a group action.
 -  We no longer instantiate any Sage graphs, saving some overhead.
 -  The class `OrbitLookupTree` has been introduced. The methods `extend`, `green_nodes`, `orbit_rep` correspond to the old functions  `build_orbit_tree`, `green_nodes`, `orbit_rep_from_tree`; these are available in the file `orbits-legacy.sage` for backward compatibility.
+- The `stabilizer` method is no longer supported.
+- The option `linear` is provided to specify that we want the induced action on subspaces rather than subsets. Currently this requires the base field to be F_2.
+- In the computation of the extension of an orbit lookup tree from level n to level n+1, the second step has been simplified; instead of forming a group retract, we directly identify the orbits and stabilizers.
