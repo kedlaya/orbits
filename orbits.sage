@@ -196,44 +196,60 @@ class OrbitLookupTree():
         """
         return max(self.tree.keys())
 
-    def orbit_rep_recursive(self, mats, n, find_green=True):
+    def _orbit_rep(self, l, n, find_green=True):
         """
         Find the orbit representative for a given tuple.
 
         This is structured for internal use. Use ``orbit_rep`` instead.
         """
         if n == 0:
-            return mats, self.identity
-        mats0 = mats[:-1]
-        if mats0 in self[n-1] and 'gpel' not in self[n-1][mats0]: # Truncation is an ineligible node
-            return None, None
-        elif mats0 in self[n-1] and 'stab' in self[n-1][mats0]: # Truncation is a green node
-            g0 = self.identity
-            y = mats[-1]
-            assert y not in mats0
-        else: # Truncation needs to be resolved
-            mats0, g0 = self.orbit_rep_recursive(mats0, n-1)
+            return [(mats, self.identity) for mats in l]
+        ans = []
+        # Classify truncations
+        l0 = [mats[:-1] for mats in l]
+        cache = {}
+        queue = []
+        for mats0 in l0:
+            if mats0 in cache: # Repeated entry
+                pass
+            elif mats0 in self[n-1] and 'gpel' not in self[n-1][mats0]: # Truncation is ineligible
+                cache[mats0] = (None, None)
+            elif mats0 in self[n-1] and 'stab' in self[n-1][mats0]: # Truncation is green
+                cache[mats0] = (mats0, self.identity)
+            else: # Truncation needs to be resolved
+                cache[mats0] = () # Record a dummy value to eliminate duplication in queue
+                queue.append(mats0)
+        # Run the recursion and file the results.
+        if queue:
+            cache.update(zip(queue, self._orbit_rep(queue, n-1)))
+        # Finish with retracts.
+        ans = []
+        for mats in l:
+            mats0, g0 = cache[mats[:-1]]
             if mats0 is None: # Found an ineligible node
-                return None, None
+                ans.append((None, None))
+                continue
             assert 'gpel' in self[n-1][mats0]
-            y = self.action(~g0, mats[-1])
-        if self.linear: # Canonicalize quotient representative
-            y = self[n-1][mats0]['quot'](y)
-            y.set_immutable()
-        if self[n-1][mats0]['stab'][0] == 1: # Trivial stabilizer, no retract needed
-            g1 = self.identity
-            z = y
-        else:
-            z, g1, _ = self[n-1][mats0]['retract'][y]
-        assert z not in mats0
-        mats1 = mats0 + (z,)
-        if not find_green:
-            return mats1, g0*g1
-        if 'gpel' not in self[n][mats1]: # Found an ineligible node
-            return None, None
-        mats2, g2 = self[n][mats1]['gpel']
-        assert 'gpel' in self[n][mats2]
-        return mats2, g0*g1*g2
+            y = mats[-1] if g0 == self.identity else self.action(~g0, mats[-1])
+            if self.linear: # Canonicalize quotient representative
+                y = self[n-1][mats0]['quot'](y)
+                y.set_immutable()                        
+            if self[n-1][mats0]['stab'][0] == 1: # Trivial stabilizer, no retract needed
+                g1 = self.identity
+                z = y
+            else:
+                z, g1, _ = self[n-1][mats0]['retract'][y]
+            assert z not in mats0
+            mats1 = mats0 + (z,)
+            if not find_green:
+                ans.append((mats1, g0*g1))
+            elif 'gpel' not in self[n][mats1]: # Found an ineligible node
+                ans.append((None, None))
+            else:
+                mats2, g2 = self[n][mats1]['gpel']
+                assert 'gpel' in self[n][mats2]
+                ans.append((mats2, g0*g1*g2))
+        return ans
     
     def orbit_rep(self, mats):
         """
@@ -244,7 +260,7 @@ class OrbitLookupTree():
         n = len(mats)
         if n not in self:
             raise ValueError("Tree not computed to depth {}".format(n))
-        return self.orbit_rep_recursive(mats, n)
+        return self._orbit_rep([mats], n)[0]
 
     def green_nodes(self, n):
         r"""
@@ -375,7 +391,7 @@ class OrbitLookupTree():
                         j.set_immutable()
             else:
                 tmp = [tuple(mats[t[i]] for i in range(n)) for t in transporters]
-            tmp2 = [self.orbit_rep_recursive(i, n, find_green=False) for i in tmp]
+            tmp2 = self._orbit_rep(tmp, n, find_green=False)
             if any(i[0] is None for i in tmp2) or (self.forbid and self.forbid(mats)):
                 for (j, _) in tmp2:
                     if j is not None:
