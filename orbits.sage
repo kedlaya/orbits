@@ -34,6 +34,35 @@ def random_generating_sequence(G):
             l.append(G.random_element())
         return l
 
+def binary_search_sort(n, i):
+    """
+    Sort ``range(n)`` according to a binary search for `i`.
+    
+    EXAMPLES::
+    
+        sage: [binary_search_sort(5, i) for i in range(5)]
+        [[3, 4, 2, 1, 0],
+        [3, 4, 2, 0, 1],
+        [3, 4, 0, 1, 2],
+        [0, 1, 2, 4, 3],
+        [0, 1, 2, 3, 4]]
+    """
+    lower_limit = 0
+    upper_limit = n
+    if i < 0 or i >= n:
+        raise ValueError("Must have 0 <= i < n")
+    ans = []
+    while lower_limit < i or upper_limit > i+1:
+        middle = (lower_limit+upper_limit+1) // 2
+        if i >= middle:
+            ans.extend(range(lower_limit, middle))
+            lower_limit = middle
+        else:
+            ans.extend(range(middle, upper_limit))
+            upper_limit = middle
+    ans.append(i)
+    return ans
+
 class CayleyGroupRetract():
     """
     Group retract object associated to a group action and a Cayley digraph.
@@ -198,7 +227,7 @@ class OrbitLookupTree():
 
     def _orbit_rep(self, l, n, find_green=True):
         """
-        Find the orbit representative for a given tuple.
+        Find orbit representatives for a list of tuples.
 
         This is structured for internal use. Use ``orbit_rep`` instead.
         """
@@ -206,6 +235,7 @@ class OrbitLookupTree():
             return [(mats, self.identity) for mats in l]
         ans = []
         # Classify truncations
+        l = list(l)
         l0 = [mats[:-1] for mats in l]
         cache = {}
         queue = []
@@ -372,15 +402,15 @@ class OrbitLookupTree():
                 if not w[:n-1]:
                     continue
                 pos = min(i for i in range(n-1) if w[i])
-                M1 = identity_matrix(GF(2), n)
-                M1[pos,pos] = 0
-                M1[n-1,pos] = 1
+                sort_pos = binary_search_sort(n, pos)
+                M1 = Matrix(GF(2), n, n)
+                for i in range(n-1):
+                    M1[i, sort_pos[i]] = 1
                 for i in range(n):
-                    M1[i,n-1] = w[i]
-                M1 = ~M1
+                    M1[n-1,i] = w[i]
                 transporters.append(M1)
         else: # Construct transporters for action of S_n on {1,...,n}
-            transporters = [tuple(n-1 if i==j else j if i==n-1 else i for i in range(n)) for j in range(n-1)]
+            transporters = [tuple(binary_search_sort(n, j)) for j in range(n-1)]
         for mats in selfn:
             if 'gpel' in selfn[mats]:
                 continue
