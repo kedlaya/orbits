@@ -401,14 +401,15 @@ class OrbitLookupTree():
             for w in W:
                 if not w[:n-1]:
                     continue
-                pos = min(i for i in range(n-1) if w[i])
-                sort_pos = binary_search_sort(n, pos)
-                M1 = Matrix(GF(2), n, n)
-                for i in range(n-1):
-                    M1[i, sort_pos[i]] = 1
-                for i in range(n):
-                    M1[n-1,i] = w[i]
-                transporters.append(M1)
+                vecs = []
+                for v in W:
+                    if v.dot_product(w) == 0 and Matrix(vecs + [v]).rank() > len(vecs):
+                        vecs.append(v)
+                        if len(vecs) == n-1:
+                            break
+                quot = W.quotient(W.subspace(vecs))
+                vecs.append(quot.lift(quot.basis()[0]))
+                transporters.append(Matrix(vecs))
         else: # Construct transporters for action of S_n on {1,...,n}
             transporters = [tuple(binary_search_sort(n, j)) for j in range(n-1)]
         for mats in selfn:
