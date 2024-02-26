@@ -242,8 +242,6 @@ class OrbitLookupTree():
         for mats0 in l0:
             if mats0 in cache: # Repeated entry
                 pass
-            elif mats0 in self[n-1] and 'gpel' not in self[n-1][mats0]: # Truncation is ineligible
-                cache[mats0] = (None, None)
             elif mats0 in self[n-1] and 'stab' in self[n-1][mats0]: # Truncation is green
                 cache[mats0] = (mats0, self.identity)
             else: # Truncation needs to be resolved
@@ -259,7 +257,6 @@ class OrbitLookupTree():
             if mats0 is None: # Found an ineligible node
                 ans.append((None, None))
                 continue
-            assert 'gpel' in self[n-1][mats0]
             y = mats[-1] if g0 == self.identity else self.action(~g0, mats[-1])
             if self.linear: # Canonicalize quotient representative
                 y = self[n-1][mats0]['quot'](y)
@@ -269,15 +266,13 @@ class OrbitLookupTree():
                 z = y
             else:
                 z, g1, _ = self[n-1][mats0]['retract'][y]
-            assert z not in mats0
             mats1 = mats0 + (z,)
             if not find_green:
                 ans.append((mats1, g0*g1))
-            elif 'gpel' not in self[n][mats1]: # Found an ineligible node
+            elif mats1 not in self[n]: # Found an ineligible node
                 ans.append((None, None))
             else:
                 mats2, g2 = self[n][mats1]['gpel']
-                assert 'gpel' in self[n][mats2]
                 ans.append((mats2, g0*g1*g2))
         return ans
     
@@ -424,6 +419,7 @@ class OrbitLookupTree():
                 tmp = [tuple(mats[t[i]] for i in range(n)) for t in transporters]
             tmp2 = self._orbit_rep(tmp, n, find_green=False)
             if any(i[0] is None for i in tmp2) or (self.forbid and self.forbid(mats)):
+                selfn[mats]['gpel'] = None
                 for (j, _) in tmp2:
                     if j is not None:
                         selfn[j]['gpel'] = None
@@ -437,8 +433,8 @@ class OrbitLookupTree():
                         selfn[mats1]['gpel'] = (mats, ~g1)
         if self.forbid:
             for mats in list(selfn.keys()):
-                if 'gpel' in selfn[mats] and selfn[mats]['gpel'] is None:
-                    del selfn[mats]['gpel']
+                if selfn[mats]['gpel'] is None:
+                    del selfn[mats]
         if verbose:
             print("Number of new green nodes: {}".format(sum(1 for _ in self.green_nodes(n))))
             print("New level: {}".format(n))
