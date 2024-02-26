@@ -7,4 +7,5 @@ We document here some changes to this code relative to [the original version fou
 -  The class `OrbitLookupTree` has been introduced. The methods `extend`, `green_nodes`, `orbit_rep` correspond to the old functions  `build_orbit_tree`, `green_nodes`, `orbit_rep_from_tree`; these are available in the file `orbits-legacy.sage` for backward compatibility.
 - The `stabilizer` method is no longer supported.
 - The option `linear` is provided to specify that we want the induced action on subspaces rather than subsets. Currently this requires the base field to be F_2.
-- In the computation of the extension of an orbit lookup tree from level n to level n+1, the second step has been simplified; instead of forming a group retract, we directly identify the orbits and stabilizers.
+- The computation of orbit representatives now supports batch execution.
+- In the computation of the extension of an orbit lookup tree from level n to level n+1, the second step has been simplified; instead of forming a group retract, we directly identify the orbits and stabilizers. We also use batch computation of orbit representatives to save some work.
