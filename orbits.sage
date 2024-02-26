@@ -300,7 +300,7 @@ class OrbitLookupTree():
             if 'stab' in selfnmats:
                 yield mats
 
-    def stabilizer_from_gens(self, mats):
+    def stabilizer(self, mats):
         """
         Compute the stabilizer of a subset of vertices.
         
@@ -309,10 +309,10 @@ class OrbitLookupTree():
         n = len(mats)
         selfnmats = self[n][mats]
         if selfnmats['stab'][0] > 0: # Already computed
-            return None
+            return selfnmats['stab']
         if n == 0:
             selfnmats['stab'] = (self.G_order, self.G_gens)
-            return None
+            return selfnmats['stab']
         parent = mats[:-1]
         if self[n-1][parent]['stab'][0] == 1: # Parent has trivial stabilizer
             G1_gap = G.subgroup([]).gap()
@@ -323,13 +323,14 @@ class OrbitLookupTree():
         order = G2_gap.Size().sage()
         optimized_gens = [self.optimized_rep(g) for g in G2_gap.SmallGeneratingSet()]
         selfnmats['stab'] = (order, optimized_gens)
+        return selfnmats['stab']
 
     def construct_children(self, mats):
         """
         Construct the children of a green node using a Cayley group retract.
         """
         n = len(mats)
-        order, gens = self[n][mats]['stab']        
+        order, gens =  self.stabilizer(mats)
         if self.linear: # Action on nonzero elements of the quotient space
             quot = self.V.quotient(self.V.subspace(mats))
             lifts = [quot.lift(v) for v in quot.basis()]
@@ -369,8 +370,7 @@ class OrbitLookupTree():
         G = self.G
         check_count = 0
         for mats in self.green_nodes(n):
-            self.stabilizer_from_gens(mats)
-            order, gens = self[n][mats]['stab']
+            order, gens = self.stabilizer(mats)
             if not self.forbid:
                 assert self.G_order % order == 0
                 check_count += self.G_order // order
