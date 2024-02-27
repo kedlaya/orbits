@@ -174,7 +174,7 @@ class OrbitLookupTree():
     - ``retract`` (for `U` green and `k<n`): a dictionary whose value at `y \in S \setminus U` (resp. `y \in S/U`) is an element `g \in G_U` such that `U \cup \{g^{-1}(y)\}` (resp. `\pi_U^{-1}(g^{-1}(y))`) is a red or green node.    
     """
 
-    def __init__(self, G, vertices, methods=None, linear=False):
+    def __init__(self, G, vertices, methods=None):
         r"""
         The entries of ``methods`` (all optional):
  
@@ -188,7 +188,6 @@ class OrbitLookupTree():
         """
         self.G = G
         self.G_order = G.order()
-        self.linear = linear
         
         if methods is None:
             methods = {}
@@ -199,14 +198,8 @@ class OrbitLookupTree():
         S0 = tuple()
         self.tree = {0: {S0: {'gpel': (S0, self.identity), 'stab': (0, [])}}}
 
-        if self.linear:
-            self.V = vertices
-            self.vertices = list(vertices)
-            for v in self.vertices:
-                v.set_immutable()
-            self[0][S0]['quot'] = self.V
-        else:
-            self.vertices = vertices
+        self.V = vertices
+        self.vertices, _ = self.residual_action(())
 
         S = set(self.vertices)
         self.G_gens = [self.optimized_rep(g) for g in random_generating_sequence(G)]
@@ -224,6 +217,13 @@ class OrbitLookupTree():
         Compute the current depth of the tree.
         """
         return max(self.tree.keys())
+
+    def residual_action(self, mats):
+        n = len(mats)
+        vertices = [M for M in self.V if M not in mats]
+        action = self.action
+        self[n][mats]['quot'] = lambda x: x    
+        return vertices, action
 
     def _orbit_rep(self, l, n, find_green=True):
         """
@@ -258,9 +258,7 @@ class OrbitLookupTree():
                 ans.append((None, None))
                 continue
             y = mats[-1] if g0 == self.identity else self.action(~g0, mats[-1])
-            if self.linear: # Canonicalize quotient representative
-                y = self[n-1][mats0]['quot'](y)
-                y.set_immutable()                        
+            y = self[n-1][mats0]['quot'](y)    
             if self[n-1][mats0]['stab'][0] == 1: # Trivial stabilizer, no retract needed
                 z = y
                 g1 = self.identity
@@ -299,7 +297,7 @@ class OrbitLookupTree():
         """
         Compute the stabilizer of a subset of vertices.
         
-        We record the order of the group and a short generating sequence.
+        Outputs the order of the group and a short generating sequence.
         """
         n = len(mats)
         selfnmats = self[n][mats]
@@ -326,25 +324,7 @@ class OrbitLookupTree():
         """
         n = len(mats)
         order, gens =  self.stabilizer(mats)
-        if self.linear: # Action on nonzero elements of the quotient space
-            quot = self.V.quotient(self.V.subspace(mats))
-            lifts = [quot.lift(v) for v in quot.basis()]
-            W = VectorSpace(GF(2), quot.dimension())
-            vertices = [sum(i*j for i,j in zip(lifts, W.coordinates(w))) for w in W if w]
-            for v in vertices:
-                v.set_immutable()
-            section_on_basis = [quot.lift(quot(v)) for v in self.V.basis()]
-            def section(x, section_on_basis=section_on_basis, V=self.V):
-                y = V(0)
-                for a,b in zip(V.coordinates(x), section_on_basis):
-                    y += a*b
-                y.set_immutable()
-                return y       
-            self[n][mats]['quot'] = section
-            action = lambda g, x, section=section, action=self.action: section(action(g, x))
-        else:
-            vertices = [M for M in self.vertices if M not in mats]
-            action = self.action
+        vertices, action = self.residual_action(mats)
         if order > 1:
             retract = CayleyGroupRetract(self.G, vertices, action, self.optimized_rep, gens=gens, order=order)
             self[n][mats]['retract'] = retract
@@ -353,6 +333,9 @@ class OrbitLookupTree():
             if M in mats:
                 raise ValueError("Found repeated entry in tuple")
             self[n+1][mats1] = {}
+
+    def predicted_count(self, n):
+        return binomial(len(self.vertices), n)
 
     def nodes_at_new_level(self, verbose=False):
         """
@@ -374,15 +357,21 @@ class OrbitLookupTree():
                 print("Constructed children of a node with stabilizer order {}".format(order))
         # If no forbidden vertices, check the orbit-stabilizer formula.
         if not self.forbid:
-            if self.linear:
-                dim = self.V.dimension()
-                predicted_count = prod(2**(dim-i)-1 for i in range(n)) // prod(2**(n-i)-1 for i in range(n))
-            else:
-                predicted_count = binomial(len(self.vertices), n)
-            if check_count != predicted_count:
+            if check_count != self.predicted_count(n):
                 raise RuntimeError("Error in orbit-stabilizer formula")
         if verbose:
             print("Number of new nodes: {}".format(len(self[n+1])))
+
+    def apply_transporter(self, M, mats):
+        n = len(mats)
+        return tuple(mats[M[i]] for i in range(n))
+
+    def transporters(self, n):
+        cache = []
+        for j in range(n-1):
+            M = binary_search_sort(n, j)
+            cache.append(lambda mats, M=M: self.apply_transporter(M, mats))
+        return cache
 
     def classify_nodes(self, verbose=False):
         """
@@ -390,33 +379,11 @@ class OrbitLookupTree():
         """
         n = self.depth()
         selfn = self[n]
-        transporters = []
-        if self.linear: # Construct transporters for action of GL(n, F_2) on P^{n-1}(F_2)
-            W = VectorSpace(GF(2), n)
-            for w in W:
-                if not w[:n-1]:
-                    continue
-                vecs = []
-                for v in W:
-                    if v.dot_product(w) == 0 and Matrix(vecs + [v]).rank() > len(vecs):
-                        vecs.append(v)
-                        if len(vecs) == n-1:
-                            break
-                quot = W.quotient(W.subspace(vecs))
-                vecs.append(quot.lift(quot.basis()[0]))
-                transporters.append(Matrix(vecs))
-        else: # Construct transporters for action of S_n on {1,...,n}
-            transporters = [tuple(binary_search_sort(n, j)) for j in range(n-1)]
+        transporters = self.transporters(n)
         for mats in selfn:
             if 'gpel' in selfn[mats]: # Already encountered this node
                 continue
-            if self.linear: # Apply transporters
-                tmp = [tuple(sum(t[i,j]*mats[j] for j in range(n)) for i in range(n)) for t in transporters]
-                for i in tmp:
-                    for j in i:
-                        j.set_immutable()
-            else:
-                tmp = [tuple(mats[t[i]] for i in range(n)) for t in transporters]
+            tmp = [t(mats) for t in transporters]
             tmp2 = self._orbit_rep(tmp, n, find_green=False)
             if self.forbid and (any(i[0] is None for i in tmp2) or self.forbid(mats)):
                 selfn[mats]['gpel'] = None
@@ -447,4 +414,56 @@ class OrbitLookupTree():
         while self.depth() < n:
             self.nodes_at_new_level(verbose)
             self.classify_nodes(verbose)
+
+class LinearOrbitLookupTree(OrbitLookupTree):
+    r"""
+    Class for linear orbit lookup trees.
+    """
+    def residual_action(self, mats):
+        quot = self.V.quotient(self.V.subspace(mats))
+        lifts = [quot.lift(v) for v in quot.basis()]
+        W = VectorSpace(GF(2), quot.dimension())
+        vertices = [sum(i*j for i,j in zip(lifts, W.coordinates(w))) for w in W if w]
+        for v in vertices:
+            v.set_immutable()
+        section_on_basis = [quot.lift(quot(v)) for v in self.V.basis()]
+        def section(x, section_on_basis=section_on_basis, V=self.V):
+            y = V(0)
+            for a,b in zip(V.coordinates(x), section_on_basis):
+                y += a*b
+            y.set_immutable()
+            return y       
+        self[len(mats)][mats]['quot'] = section
+        action = lambda g, x, section=section, action=self.action: section(action(g, x))
+        return vertices, action
+
+    def predicted_count(self, n):
+        dim = self.V.dimension()
+        return prod(2**(dim-i)-1 for i in range(n)) // prod(2**(n-i)-1 for i in range(n))
+
+    def apply_transporter(self, M, mats):
+        n = len(mats)
+        mats1 = tuple(sum(M[i,j]*mats[j] for j in range(n)) for i in range(n))
+        for i in mats1:
+            i.set_immutable()
+        return mats1
+
+    def transporters(self, n):
+        cache = []
+        W = VectorSpace(GF(2), n)
+        for w in W:
+            if not w[:n-1]:
+                continue
+            vecs = []
+            for v in W:
+                if v.dot_product(w) == 0 and Matrix(vecs + [v]).rank() > len(vecs):
+                    vecs.append(v)
+                    if len(vecs) == n-1:
+                        break
+            quot = W.quotient(W.subspace(vecs))
+            vecs.append(quot.lift(quot.basis()[0]))
+            M = Matrix(vecs)
+            cache.append(lambda mats, M=M: self.apply_transporter(M, mats))
+        return cache
+
 

@@ -18,7 +18,7 @@ methods = {'action': mult_immutable,
            'optimized_rep': optimized_rep}
 
 S = VectorSpace(F, 10)
-tree = OrbitLookupTree(G, S, methods, linear=True)
+tree = LinearOrbitLookupTree(G, S, methods)
 tree.extend(4, verbose=True)
 
 # Print stabilizers at level 3
