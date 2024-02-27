@@ -262,12 +262,12 @@ class OrbitLookupTree():
                 y = self[n-1][mats0]['quot'](y)
                 y.set_immutable()                        
             if self[n-1][mats0]['stab'][0] == 1: # Trivial stabilizer, no retract needed
-                g1 = self.identity
                 z = y
+                g1 = self.identity
             else:
                 z, g1, _ = self[n-1][mats0]['retract'][y]
             mats1 = mats0 + (z,)
-            if not find_green:
+            if not find_green: # Abridged operation
                 ans.append((mats1, g0*g1))
             elif mats1 not in self[n]: # Found an ineligible node
                 ans.append((None, None))
@@ -312,7 +312,7 @@ class OrbitLookupTree():
         if self[n-1][parent]['stab'][0] == 1: # Parent has trivial stabilizer
             G1_gap = G.subgroup([]).gap()
         else:
-            retract = self[n-1][mats[:-1]]['retract']
+            retract = self[n-1][parent]['retract']
             G1_gap = retract.stabilizer(mats[-1], gap=True)
         G2_gap = G1_gap.ClosureGroup(selfnmats['stab'][1])
         order = G2_gap.Size().sage()
@@ -408,9 +408,9 @@ class OrbitLookupTree():
         else: # Construct transporters for action of S_n on {1,...,n}
             transporters = [tuple(binary_search_sort(n, j)) for j in range(n-1)]
         for mats in selfn:
-            if 'gpel' in selfn[mats]:
+            if 'gpel' in selfn[mats]: # Already encountered this node
                 continue
-            if self.linear:
+            if self.linear: # Apply transporters
                 tmp = [tuple(sum(t[i,j]*mats[j] for j in range(n)) for i in range(n)) for t in transporters]
                 for i in tmp:
                     for j in i:
@@ -418,11 +418,11 @@ class OrbitLookupTree():
             else:
                 tmp = [tuple(mats[t[i]] for i in range(n)) for t in transporters]
             tmp2 = self._orbit_rep(tmp, n, find_green=False)
-            if any(i[0] is None for i in tmp2) or (self.forbid and self.forbid(mats)):
+            if self.forbid and (any(i[0] is None for i in tmp2) or self.forbid(mats)):
                 selfn[mats]['gpel'] = None
-                for (j, _) in tmp2:
-                    if j is not None:
-                        selfn[j]['gpel'] = None
+                for (mats1, _) in tmp2:
+                    if mats1 is not None:
+                        selfn[mats1]['gpel'] = None
             else:
                 selfn[mats]['gpel'] = (mats, self.identity)
                 selfn[mats]['stab'] = (0, [])
@@ -431,10 +431,10 @@ class OrbitLookupTree():
                         selfn[mats]['stab'][1].append(g1) # Stabilizer element
                     else:
                         selfn[mats1]['gpel'] = (mats, ~g1)
-        if self.forbid:
-            for mats in list(selfn.keys()):
-                if selfn[mats]['gpel'] is None:
-                    del selfn[mats]
+        if self.forbid: # Remove black nodes
+            nodes_to_delete = [mats for mats in selfn if selfn[mats]['gpel'] is None]
+            for mats in nodes_to_delete:
+                del selfn[mats]
         if verbose:
             print("Number of new green nodes: {}".format(sum(1 for _ in self.green_nodes(n))))
             print("New level: {}".format(n))
