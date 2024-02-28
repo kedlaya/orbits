@@ -188,6 +188,7 @@ class OrbitLookupTree():
         """
         self.G = G
         self.G_order = G.order()
+        self.V = vertices
         
         if methods is None:
             methods = {}
@@ -198,10 +199,10 @@ class OrbitLookupTree():
         S0 = tuple()
         self.tree = {0: {S0: {'gpel': (S0, self.identity), 'stab': (0, [])}}}
 
-        self.V = vertices
-        self.vertices, _ = self.residual_action(())
-
-        S = set(self.vertices)
+        try:
+            S = set(vertices)
+        except TypeError:
+            S = vertices
         self.G_gens = [self.optimized_rep(g) for g in random_generating_sequence(G)]
         for g in self.G_gens:
             assert all(self.action(g, x) in S for x in S)
@@ -225,6 +226,14 @@ class OrbitLookupTree():
         self[n][mats]['quot'] = lambda x: x    
         return vertices, action
 
+    def green_nodes(self, n):
+        r"""
+        Return an iterator over green nodes (orbit representatives) at depth `n`.
+        """
+        for mats, selfnmats in self[n].items():
+            if 'stab' in selfnmats:
+                yield mats
+
     def _orbit_rep(self, l, n, find_green=True):
         """
         Find orbit representatives for a list of tuples.
@@ -234,22 +243,19 @@ class OrbitLookupTree():
         if n == 0:
             return [(mats, self.identity) for mats in l]
         ans = []
-        # Classify truncations
+        # Prepare truncations for recursive classification.
         l = list(l)
         l0 = [mats[:-1] for mats in l]
         cache = {}
-        queue = []
         for mats0 in l0:
-            if mats0 in cache: # Repeated entry
-                pass
-            elif mats0 in self[n-1] and 'stab' in self[n-1][mats0]: # Truncation is green
-                cache[mats0] = (mats0, self.identity)
-            else: # Truncation needs to be resolved
-                cache[mats0] = () # Record a dummy value to eliminate duplication in queue
-                queue.append(mats0)
+            if mats0 not in cache:
+                if mats0 in self[n-1] and 'stab' in self[n-1][mats0]: # Truncation is green
+                    cache[mats0] = (mats0, self.identity)
+                else: # Truncation needs to be resolved
+                    cache[mats0] = () # Record a dummy value to eliminate duplication in queue
         # Run the recursion and file the results.
-        if queue:
-            cache.update(zip(queue, self._orbit_rep(queue, n-1)))
+        if cache:
+            cache.update(zip(cache.keys(), self._orbit_rep(cache.keys(), n-1)))
         # Finish with retracts.
         ans = []
         for mats in l:
@@ -258,7 +264,7 @@ class OrbitLookupTree():
                 ans.append((None, None))
                 continue
             y = mats[-1] if g0 == self.identity else self.action(~g0, mats[-1])
-            y = self[n-1][mats0]['quot'](y)    
+            y = self[n-1][mats0]['quot'](y) # Canonicalize representative
             if self[n-1][mats0]['stab'][0] == 1: # Trivial stabilizer, no retract needed
                 z = y
                 g1 = self.identity
@@ -284,14 +290,6 @@ class OrbitLookupTree():
         if n not in self:
             raise ValueError("Tree not computed to depth {}".format(n))
         return self._orbit_rep([mats], n)[0]
-
-    def green_nodes(self, n):
-        r"""
-        Return an iterator over green nodes at depth `n`.
-        """
-        for mats, selfnmats in self[n].items():
-            if 'stab' in selfnmats:
-                yield mats
 
     def stabilizer(self, mats):
         """
@@ -323,19 +321,19 @@ class OrbitLookupTree():
         Construct the children of a green node using a Cayley group retract.
         """
         n = len(mats)
-        order, gens =  self.stabilizer(mats)
+        order, gens = self.stabilizer(mats)
         vertices, action = self.residual_action(mats)
         if order > 1:
             retract = CayleyGroupRetract(self.G, vertices, action, self.optimized_rep, gens=gens, order=order)
             self[n][mats]['retract'] = retract
         for M in (vertices if order == 1 else retract.reps()):
-            mats1 = mats + (M,)
             if M in mats:
                 raise ValueError("Found repeated entry in tuple")
+            mats1 = mats + (M,)
             self[n+1][mats1] = {}
 
     def predicted_count(self, n):
-        return binomial(len(self.vertices), n)
+        return binomial(len(self.V), n)
 
     def nodes_at_new_level(self, verbose=False):
         """
@@ -345,10 +343,9 @@ class OrbitLookupTree():
         if verbose:
             print("Original depth: {}".format(n))
         self.tree[n+1] = {}
-        G = self.G
         check_count = 0
         for mats in self.green_nodes(n):
-            order, gens = self.stabilizer(mats)
+            order, _ = self.stabilizer(mats)
             if not self.forbid:
                 assert self.G_order % order == 0
                 check_count += self.G_order // order
@@ -363,15 +360,10 @@ class OrbitLookupTree():
             print("Number of new nodes: {}".format(len(self[n+1])))
 
     def apply_transporter(self, M, mats):
-        n = len(mats)
-        return tuple(mats[M[i]] for i in range(n))
+        return tuple(mats[M[i]] for i in range(len(mats)))
 
     def transporters(self, n):
-        cache = []
-        for j in range(n-1):
-            M = binary_search_sort(n, j)
-            cache.append(lambda mats, M=M: self.apply_transporter(M, mats))
-        return cache
+        return [lambda mats, M=binary_search_sort(n, j): self.apply_transporter(M, mats)) for j in range(n-1)]
 
     def classify_nodes(self, verbose=False):
         """
@@ -462,8 +454,7 @@ class LinearOrbitLookupTree(OrbitLookupTree):
                         break
             quot = W.quotient(W.subspace(vecs))
             vecs.append(quot.lift(quot.basis()[0]))
-            M = Matrix(vecs)
-            cache.append(lambda mats, M=M: self.apply_transporter(M, mats))
+            cache.append(lambda mats, M=Matrix(vecs): self.apply_transporter(M, mats))
         return cache
 
 
