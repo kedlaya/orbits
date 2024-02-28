@@ -14,7 +14,7 @@ G = MatrixGroup([g1,g2])
 def optimized_rep(g):
     return g.matrix()
 
-methods = {'action': mult_immutable,
+methods = {'action': lambda g, x: as_immutable(g*x),
            'optimized_rep': optimized_rep}
 
 S = VectorSpace(F, 10)

@@ -30,18 +30,15 @@ l2.append(Matrix(F, [[0,1,0,0,0,1,0,0,1,0],
 G1 = G0.subgroup(l2)
 assert G0.order() // G1.order() == 2
 
-def apply_group_elem(g, M, set_immutable=True):
+def apply_group_elem(g, M):
     M1 = M*g.transpose() # Result is mutable
     M1.echelonize()
-    if set_immutable:
-        M1.set_immutable()
-    return M1
+    return as_immutable(M1)
     
 def optimized_rep(g):
     return g.matrix()
 
-M0 = block_matrix(1, 2, [identity_matrix(F, 5), Matrix(F,5)], subdivide=False)
-M0.set_immutable()
+M0 = as_immutable(block_matrix(1, 2, [identity_matrix(F, 5), Matrix(F,5)], subdivide=False))
 assert M0.echelon_form() == M0
 
 retract = CayleyGroupRetract(G1, [M0], apply_group_elem, optimized_rep)
@@ -84,8 +81,7 @@ if use_forbid:
             for V in l2:
                 K = K.intersection(V)
             v = K.gens()[0]
-            v.set_immutable()
-            ans[m] = v
+            ans[m] = as_immutable(v)
         return ans
 
     coords = spinor_coordinates(vertices)
@@ -112,10 +108,12 @@ if use_forbid:
             if J.dimension() > 1:
                  return True
         return False
+else:
+    forbid = None
 
 methods = {'action': apply_group_elem,
            'optimized_rep': optimized_rep,
-           'forbid': forbid if use_forbid else None}
+           'forbid': forbid}
            
 tree = OrbitLookupTree(G1, vertices, methods)
 tree.extend(6, verbose=True)

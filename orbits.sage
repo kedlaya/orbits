@@ -2,11 +2,6 @@ import random
 load("bfs.pyx")
 
 def return_immutable(v):
-    """
-    Return v after having made it immutable.
-    
-    This is useful for generating an immutable vector in an expression (e.g., in a lambda function).
-    """
     v.set_immutable()
     return v
 
@@ -82,7 +77,6 @@ class CayleyGroupRetract():
     """
     def __init__(self, G, S, action, optimized_rep=None, check_closure=False, order=None, gens=None):
         self.G = G
-        self.vertices = list(S)
         self.action = action
         self.optimized_rep = optimized_rep if optimized_rep else (lambda g: g)
         self.gens = [self.optimized_rep(g) for g in random_generating_sequence(G)] if gens is None else gens
@@ -94,9 +88,8 @@ class CayleyGroupRetract():
         # Conduct a breadth-first search.
         d = {}
         iden = self.optimized_rep(G(1))
-        self.orbit_len = {}
         neighbors = lambda M, action=self.action, gens=self.gens: ((action(g, M), g) for g in gens)
-        for v in self.vertices:
+        for v in S:
             if v not in d:
                 d[v] = (v, iden, 0)
                 orbit_len = dfs(neighbors, d, v)
@@ -112,11 +105,11 @@ class CayleyGroupRetract():
     def __contains__(self, item):
         return (item in self.d)
         
-    def items(self):
-        return self.d.items()
-
     def keys(self):
         return self.d.keys()
+
+    def items(self):
+        return self.d.items()
 
     def reps(self):
         """
@@ -144,7 +137,7 @@ class CayleyGroupRetract():
             return H if gap else G.subgroup([])
 
         d = self.d
-        orbit = [w for w in self.vertices if d[w][0] == mats0]
+        orbit = [w for w in d if d[w][0] == mats0]
         order = 1
         while order < target_order:
             # Produce random stabilizer elements until we hit the right order.
@@ -223,6 +216,9 @@ class OrbitLookupTree():
         return max(self.tree.keys())
 
     def residual_action(self, mats):
+        """
+        Compute the residual action associated to a node.
+        """
         n = len(mats)
         vertices = [M for M in self.V if M not in mats]
         action = self.action
@@ -336,6 +332,9 @@ class OrbitLookupTree():
             self[n+1][mats1] = {}
 
     def predicted_count(self, n):
+        """
+        Compute the size of the implicit target of the action at depth `n`.
+        """
         return binomial(len(self.V), n)
 
     def nodes_at_new_level(self, verbose=False):
@@ -366,7 +365,7 @@ class OrbitLookupTree():
         return tuple(mats[M[i]] for i in range(len(mats)))
 
     def transporters(self, n):
-        return [(lambda mats, M=binary_search_sort(n, j): self.apply_transporter(M, mats)) for j in range(n-1)]
+        return [binary_search_sort(n, j) for j in range(n-1)]
 
     def classify_nodes(self, verbose=False):
         """
@@ -378,7 +377,7 @@ class OrbitLookupTree():
         for mats in selfn:
             if 'gpel' in selfn[mats]: # Already encountered this node
                 continue
-            tmp = [t(mats) for t in transporters]
+            tmp = [self.apply_transporter(t, mats) for t in transporters]
             tmp2 = self._orbit_rep(tmp, n, find_green=False)
             if self.forbid and (any(i[0] is None for i in tmp2) or self.forbid(mats)):
                 selfn[mats]['gpel'] = None
@@ -418,16 +417,13 @@ class LinearOrbitLookupTree(OrbitLookupTree):
         quot = self.V.quotient(self.V.subspace(mats))
         lifts = [quot.lift(v) for v in quot.basis()]
         W = VectorSpace(GF(2), quot.dimension())
-        vertices = [sum(i*j for i,j in zip(lifts, W.coordinates(w))) for w in W if w]
-        for v in vertices:
-            v.set_immutable()
+        vertices = [as_immutable(sum(i*j for i,j in zip(lifts, W.coordinates(w)))) for w in W if w]
         section_on_basis = [quot.lift(quot(v)) for v in self.V.basis()]
         def section(x, section_on_basis=section_on_basis, V=self.V):
             y = V(0)
             for a,b in zip(V.coordinates(x), section_on_basis):
                 y += a*b
-            y.set_immutable()
-            return y       
+            return as_immutable(y)
         self[len(mats)][mats]['quot'] = section
         action = lambda g, x, section=section, action=self.action: section(action(g, x))
         return vertices, action
@@ -438,10 +434,7 @@ class LinearOrbitLookupTree(OrbitLookupTree):
 
     def apply_transporter(self, M, mats):
         n = len(mats)
-        mats1 = tuple(sum(M[i,j]*mats[j] for j in range(n)) for i in range(n))
-        for i in mats1:
-            i.set_immutable()
-        return mats1
+        return tuple(as_immutable(sum(M[i,j]*mats[j] for j in range(n))) for i in range(n))
 
     def transporters(self, n):
         cache = []
@@ -457,7 +450,7 @@ class LinearOrbitLookupTree(OrbitLookupTree):
                         break
             quot = W.quotient(W.subspace(vecs))
             vecs.append(quot.lift(quot.basis()[0]))
-            cache.append(lambda mats, M=Matrix(vecs): self.apply_transporter(M, mats))
+            cache.append(Matrix(vecs))
         return cache
 
 
