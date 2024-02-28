@@ -76,15 +76,18 @@ class CayleyGroupRetract():
     If ``gens`` is specified, it is assumed to be a list of elements of `G`.
     These do not have to generate `G`; however, if they do not, then `order` is assumed
     to be the order of the subgroup that they generate.
+    
+    It is *not* required that `S` be closed under the action of `G`. To verify closure,
+    set ``check_closure=True``.
     """
-    def __init__(self, G, vertices, action, optimized_rep=None, debug=False, order=None, gens=None):
+    def __init__(self, G, S, action, optimized_rep=None, check_closure=False, order=None, gens=None):
         self.G = G
-        self.vertices = list(vertices)
+        self.vertices = list(S)
         self.action = action
         self.optimized_rep = optimized_rep if optimized_rep else (lambda g: g)
         self.gens = [self.optimized_rep(g) for g in random_generating_sequence(G)] if gens is None else gens
-        if debug:
-            vertex_set = set(vertices)
+        if check_closure:
+            vertex_set = set(S)
             assert all(action(g, v) in vertex_set for g in self.gens for v in vertex_set)
         self.G_order = G.order() if order is None else order
 
@@ -108,11 +111,11 @@ class CayleyGroupRetract():
 
     def __contains__(self, item):
         return (item in self.d)
-
+        
     def items(self):
         return self.d.items()
 
-    def vertices(self):
+    def keys(self):
         return self.d.keys()
 
     def reps(self):
@@ -363,7 +366,7 @@ class OrbitLookupTree():
         return tuple(mats[M[i]] for i in range(len(mats)))
 
     def transporters(self, n):
-        return [lambda mats, M=binary_search_sort(n, j): self.apply_transporter(M, mats)) for j in range(n-1)]
+        return [(lambda mats, M=binary_search_sort(n, j): self.apply_transporter(M, mats)) for j in range(n-1)]
 
     def classify_nodes(self, verbose=False):
         """

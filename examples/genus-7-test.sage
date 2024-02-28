@@ -30,53 +30,6 @@ l2.append(Matrix(F, [[0,1,0,0,0,1,0,0,1,0],
 G1 = G0.subgroup(l2)
 assert G0.order() // G1.order() == 2
 
-P.<x0,x12,x13,x14,x15,x23,x24,x25,x34,x35,x45,x1234,x1235,x1245,x1345,x2345> = PolynomialRing(F, 16)
-quads = [x0*x2345 + x23*x45 + x24*x35 + x25*x34,
-         x12*x1345 + x13*x1245 + x14*x1235 + x15*x1234,
-         x0*x1345 + x13*x45 + x14*x35 + x15*x34,
-         x12*x2345 + x23*x1245 + x24*x1235 + x25*x1234,
-         x0*x1245 + x12*x45 + x14*x25 + x15*x24,
-         x13*x2345 + x23*x1345 + x34*x1235 + x35*x1234,
-         x0*x1235 + x12*x35 + x13*x25 + x15*x23,
-         x14*x2345 + x24*x1345 + x34*x1245 + x45*x1234,
-         x0*x1234 + x12*x34 + x13*x24 + x14*x23,
-         x15*x2345 + x25*x1345 + x35*x1245 + x45*x1235]
-
-def spinor_coordinate(M, verify=True, set_immutable=True):
-    coord1 = [_ for i in [0,2,4] for _ in itertools.combinations(range(5), i)]
-    coord2 = [_ for i in [1,3,5] for _ in itertools.combinations(range(5), i)]
-    ops = []
-    # Annihilation operators.
-    for i in range(5):
-        ops.append(Matrix(F, 16, 16, [[1 if 
-                                       i not in coord2[k] and set(coord2[k]).union(set([i])) == set(coord1[j]) 
-                                       else 0 for k in range(16)] for j in range(16)]))
-    # Creation operators.
-    for i in range(5):
-        ops.append(Matrix(F, 16, 16, [[1 if 
-                                       i not in coord1[j] and set(coord1[j]).union(set([i])) == set(coord2[k]) 
-                                       else 0 for k in range(16)] for j in range(16)]))
-    l = [sum(ops[j]*M[i,j] for j in range(10)) for i in range(5)]
-    l2 = [N.right_kernel() for N in l]
-    K = l2[0]
-    for V in l2:
-        K = K.intersection(V)
-    if K.dimension() != 1:
-        if verify:
-            raise ValueError
-        else:
-            return None
-    v = K.gens()[0]
-    if verify:
-        assert all(P(*v) == 0 for P in quads)
-    if set_immutable:
-        v.set_immutable()
-    return v
-
-M0 = block_matrix(1, 2, [identity_matrix(F, 5), Matrix(F,5)], subdivide=False)
-M0.set_immutable()
-assert M0.echelon_form() == M0
-
 def apply_group_elem(g, M, set_immutable=True):
     M1 = M*g.transpose() # Result is mutable
     M1.echelonize()
@@ -87,45 +40,82 @@ def apply_group_elem(g, M, set_immutable=True):
 def optimized_rep(g):
     return g.matrix()
 
-vertices = []
-new_vertices = [M0]
-while new_vertices:
-    M = new_vertices.pop()
-    vertices.append(M)
-    for g in G1.gens():
-        M1 = apply_group_elem(optimized_rep(g), M, set_immutable=True)
-        if M1 not in vertices + new_vertices:
-            new_vertices.append(M1)
+M0 = block_matrix(1, 2, [identity_matrix(F, 5), Matrix(F,5)], subdivide=False)
+M0.set_immutable()
+assert M0.echelon_form() == M0
 
-S = vertices
-coords = {M: spinor_coordinate(M) for M in S}
+retract = CayleyGroupRetract(G1, [M0], apply_group_elem, optimized_rep)
+vertices = list(retract.keys())
 
-def linear_section(coords, P=P, quads=quads):
-    V = Matrix(coords).right_kernel()
-    tmp2 = [sum(P.gens()[i] * v[-1-i] for i in range(16)) for v in V.gens()] + quads
-    return P.ideal(tmp2)
+use_forbid = True
 
-def forbid(mats, coords=coords):
-    if len(mats) == 2:
-        vecs = [M.row_space() for M in mats]
-        if vecs[0].intersection(vecs[1]).dimension() != 1:
-            return True
-    tmp = [coords[M] for M in mats]
-    if len(mats) == 3:
-        if Matrix(tmp).rank() < 3:
-            return True
-    if len(mats) == 4:
-        if Matrix(tmp).rank() < 4:
-            return True
-    if len(mats) == 5:
-        J = linear_section(tmp)
-        if J.dimension() > 1:
-            return True
-    return False
-    
+if use_forbid:
+    P.<x0,x12,x13,x14,x15,x23,x24,x25,x34,x35,x45,x1234,x1235,x1245,x1345,x2345> = PolynomialRing(F, 16)
+    quads = [x0*x2345 + x23*x45 + x24*x35 + x25*x34,
+         x12*x1345 + x13*x1245 + x14*x1235 + x15*x1234,
+         x0*x1345 + x13*x45 + x14*x35 + x15*x34,
+         x12*x2345 + x23*x1245 + x24*x1235 + x25*x1234,
+         x0*x1245 + x12*x45 + x14*x25 + x15*x24,
+         x13*x2345 + x23*x1345 + x34*x1235 + x35*x1234,
+         x0*x1235 + x12*x35 + x13*x25 + x15*x23,
+         x14*x2345 + x24*x1345 + x34*x1245 + x45*x1234,
+         x0*x1234 + x12*x34 + x13*x24 + x14*x23,
+         x15*x2345 + x25*x1345 + x35*x1245 + x45*x1235]
+
+    def spinor_coordinates(M):
+        coord1 = [_ for i in [0,2,4] for _ in itertools.combinations(range(5), i)]
+        coord2 = [_ for i in [1,3,5] for _ in itertools.combinations(range(5), i)]
+        ops = []
+        # Annihilation operators.
+        for i in range(5):
+            ops.append(Matrix(F, 16, 16, [[1 if 
+                i not in coord2[k] and set(coord2[k]).union(set([i])) == set(coord1[j]) 
+                else 0 for k in range(16)] for j in range(16)]))
+        # Creation operators.
+        for i in range(5):
+            ops.append(Matrix(F, 16, 16, [[1 if 
+                i not in coord1[j] and set(coord1[j]).union(set([i])) == set(coord2[k]) 
+                else 0 for k in range(16)] for j in range(16)]))
+        ans = {}
+        for m in M:
+            l = [sum(ops[j]*m[i,j] for j in range(10)) for i in range(5)]
+            l2 = [N.right_kernel() for N in l]
+            K = l2[0]
+            for V in l2:
+                K = K.intersection(V)
+            v = K.gens()[0]
+            v.set_immutable()
+            ans[m] = v
+        return ans
+
+    coords = spinor_coordinates(vertices)
+
+    def linear_section(coords, P=P, quads=quads):
+        V = Matrix(coords).right_kernel()
+        tmp2 = [sum(P.gens()[i] * v[-1-i] for i in range(16)) for v in V.gens()] + quads
+        return P.ideal(tmp2)
+
+    def forbid(mats, coords=coords):
+        if len(mats) == 2:
+            vecs = [M.row_space() for M in mats]
+            if vecs[0].intersection(vecs[1]).dimension() != 1:
+                return True
+        tmp = [coords[M] for M in mats]
+        if len(mats) == 3:
+            if Matrix(tmp).rank() < 3:
+                return True
+        if len(mats) == 4:
+            if Matrix(tmp).rank() < 4:
+                return True
+        if len(mats) == 5:
+            J = linear_section(tmp)
+            if J.dimension() > 1:
+                 return True
+        return False
+
 methods = {'action': apply_group_elem,
            'optimized_rep': optimized_rep,
-           'forbid': forbid}
+           'forbid': forbid if use_forbid else None}
            
 tree = OrbitLookupTree(G1, vertices, methods)
 tree.extend(6, verbose=True)
