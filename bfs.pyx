@@ -15,10 +15,10 @@ def dfs(neighbors, dict d, v0):
     cdef list queue = [(v0, d[v0])]
     while True:
         try:
-            q = queue.pop()
+            w, t = queue.pop()
         except IndexError:
-            return count
-        w, t = q
+            d[v0] = d[v0][:2] + (count,)
+            break
         for (x, g) in neighbors(w):
             if x not in d:
                 u = (t[0], g*t[1], None)

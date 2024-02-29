@@ -1,7 +1,9 @@
 # Legacy interface for backward compatibility
 load("orbits.sage")
 
-def build_orbit_tree(G, S, n, methods, verbose=True, terminate=True):    
+def build_orbit_tree(G, S, n, methods, verbose=True, terminate=True):
+    if 'action' not in methods:
+        methods['action'] = methods['apply_group_elem']
     tree = OrbitLookupTree(G, S, methods)
     tree.extend(n, verbose)
     return tree

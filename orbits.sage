@@ -1,10 +1,6 @@
 import random
 load("bfs.pyx")
 
-def return_immutable(v):
-    v.set_immutable()
-    return v
-
 def random_generating_sequence(G):
     """
     Construct a random sequence of generators of a finite group.
@@ -64,9 +60,7 @@ class CayleyGroupRetract():
     
     The underlying dict is stored as the attribute ``d``, but one can also index directly.
     For a vertex `v`, the value at `v` is a pair `(w,g)` where `w` is a connected component
-    representative and `g` is a group element satisfying `g(w) = v`. Any vertex sharing a
-    component in a vertex in `exclude`, or for which `forbid` (if specified) returns `True`,
-    is omitted.
+    representative and `g` is a group element satisfying `g(w) = v`.
 
     If ``gens`` is specified, it is assumed to be a list of elements of `G`.
     These do not have to generate `G`; however, if they do not, then `order` is assumed
@@ -80,10 +74,11 @@ class CayleyGroupRetract():
         self.action = action
         self.optimized_rep = optimized_rep if optimized_rep else (lambda g: g)
         self.gens = [self.optimized_rep(g) for g in random_generating_sequence(G)] if gens is None else gens
+        self.G_order = G.order() if order is None else order
+
         if check_closure:
             vertex_set = set(S)
             assert all(action(g, v) in vertex_set for g in self.gens for v in vertex_set)
-        self.G_order = G.order() if order is None else order
 
         # Conduct a breadth-first search.
         d = {}
@@ -93,7 +88,6 @@ class CayleyGroupRetract():
             if v not in d:
                 d[v] = (v, iden, 0)
                 orbit_len = dfs(neighbors, d, v)
-                d[v] = (v, iden, orbit_len)
         self.d = d
 
     def __getitem__(self, key):
@@ -125,20 +119,25 @@ class CayleyGroupRetract():
         
         Set ``gap=True`` to return a GAP group.
         """
-        mats0, g0, _ = self[v]
-
         # Use the orbit-stabilizer formula to compute the stabilizer order.
+        mats0, g0, _ = self[v]
         orbit_len = self[mats0][2]
         target_order = ZZ(self.G_order / orbit_len)
-        H = G.subgroup([]).gap()
+
+        # Early abort for the trivial orbit.
+        if orbit_len == 1:
+            H = self.G.subgroup(self.gens)
+            return H.gap() if gap else H
 
         # Early abort for the trivial group.
         if target_order == 1:
-            return H if gap else G.subgroup([])
+            H = self.G.subgroup([])
+            return H.gap() if gap else H
 
         d = self.d
         orbit = [w for w in d if d[w][0] == mats0]
         order = 1
+        H = G.subgroup([]).gap()
         while order < target_order:
             # Produce random stabilizer elements until we hit the right order.
             e1 = random.choice(orbit)
@@ -188,7 +187,7 @@ class OrbitLookupTree():
         
         if methods is None:
             methods = {}
-        self.action = methods['action'] if 'action' in methods else methods['apply_group_elem'] if 'apply_group_elem' in methods else (lambda g, x: g*x)
+        self.action = methods['action'] if 'action' in methods else (lambda g, x: g*x)
         self.optimized_rep = methods['optimized_rep'] if 'optimized_rep' in methods else (lambda g: g)
         self.forbid = methods['forbid'] if 'forbid' in methods else None
         self.identity = self.optimized_rep(G(1))
@@ -205,9 +204,8 @@ class OrbitLookupTree():
         self.tree = {'data': {'stab': (self.G_order, self.G_gens)}}
 
     def __getitem__(self, key):
-        n = len(key)
-        if self.depth < n:
-            raise ValueError("Tree not computed to depth {}".format(n))
+        if self.depth < len(key):
+            raise ValueError("Tree not computed to depth {}".format(len(key)))
         d = self.tree
         for i in key:
             d = d[i]
@@ -264,7 +262,6 @@ class OrbitLookupTree():
         """
         if n == 0:
             return [(mats, self.identity) for mats in l]
-        ans = []
         # Prepare truncations for recursive classification.
         l = list(l)
         cache = list(set(mats[:-1] for mats in l))
