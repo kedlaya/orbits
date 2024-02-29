@@ -192,8 +192,7 @@ class OrbitLookupTree():
         self.optimized_rep = methods['optimized_rep'] if 'optimized_rep' in methods else (lambda g: g)
         self.forbid = methods['forbid'] if 'forbid' in methods else None
         self.identity = self.optimized_rep(G(1))
-        S0 = tuple()
-        self.tree = {0: {S0: {'stab': (0, [])}}}
+        self.depth = 0
 
         try:
             S = set(vertices)
@@ -202,18 +201,48 @@ class OrbitLookupTree():
         self.G_gens = [self.optimized_rep(g) for g in random_generating_sequence(G)]
         for g in self.G_gens:
             assert all(self.action(g, x) in S for x in S)
+        self.tree = {'data': {'stab': (self.G_order, self.G_gens)}}
 
     def __getitem__(self, key):
-        return self.tree[key]
+        n = len(key)
+        if self.depth < n:
+            raise ValueError("Tree not computed to depth {}".format(n))
+        d = self.tree
+        for i in key:
+            d = d[i]
+        return d
 
-    def __contains__(self, item):
-        return (item in self.tree)
+    def orbit_reps(self, n):
+        r"""
+        Return an iterator over orbit representatives at depth `n`.
+        """
+        if n == 0:
+            yield ()
+        elif self.depth < n:
+            raise ValueError("Tree not computed to depth {}".format(n))
+        else:
+            queue = [iter(self.tree.items())]
+            vals = []
+            while queue:
+                try:
+                    v, w = next(queue[-1])
+                    if v != "data":
+                        vals.append(v)
+                        if len(vals) == n:
+                            yield tuple(vals)
+                            vals.pop()
+                        else:
+                            queue.append(iter(w.items()))
+                except StopIteration:
+                    queue.pop()
+                    if queue:
+                        vals.pop()
 
-    def depth(self):
+    def count_orbit_reps(self, n):
+        r"""
+        Return the number of orbit representatives at depth `n`.
         """
-        Compute the current depth of the tree.
-        """
-        return max(self.tree.keys())
+        return sum(1 for _ in self.orbit_reps(n))
 
     def residual_action(self, mats):
         """
@@ -222,22 +251,8 @@ class OrbitLookupTree():
         n = len(mats)
         vertices = [M for M in self.V if M not in mats]
         action = self.action
-        self[n][mats]['quot'] = lambda x: x    
+        self[mats]['data']['quot'] = lambda x: x    
         return vertices, action
-
-    def orbit_reps(self, n):
-        r"""
-        Return an iterator over orbit representatives at depth `n`.
-        """
-        for mats, selfnmats in self[n].items():
-            if 'stab' in selfnmats:
-                yield mats
-
-    def count_orbit_reps(self, n):
-        r"""
-        Return the number of orbit representatives at depth `n`.
-        """
-        return sum(1 for _ in self.orbit_reps(n))
 
     def _orbit_rep(self, l, n, find_node=True):
         """
@@ -251,16 +266,9 @@ class OrbitLookupTree():
         # Prepare truncations for recursive classification.
         l = list(l)
         l0 = [mats[:-1] for mats in l]
-        cache = {}
-        for mats0 in l0:
-            if mats0 not in cache:
-                if mats0 in self[n-1]: # Truncation is an orbit rep
-                    cache[mats0] = (mats0, self.identity)
-                else: # Truncation needs to be resolved
-                    cache[mats0] = () # Record a dummy value to eliminate duplication in queue
+        cache = list(set(l0))
         # Run the recursion and file the results.
-        if cache:
-            cache.update(zip(cache.keys(), self._orbit_rep(cache.keys(), n-1)))
+        cache = dict(zip(cache, self._orbit_rep(cache, n-1)))
         # Finish with retracts.
         ans = []
         for mats in l:
@@ -268,14 +276,14 @@ class OrbitLookupTree():
             if mats0 is None: # Found an ineligible tuple
                 ans.append((None, None))
                 continue
-            parent = self[n-1][mats0]
+            parent = self[mats0]['data']
             y = mats[-1] if g0 == self.identity else self.action(~g0, mats[-1])
             y = parent['quot'](y) # Canonicalize representative
             if parent['stab'][0] == 1: # Trivial stabilizer, no retract needed
                 z = y
                 g1 = self.identity
             else:
-                z, g1, _ = self[n-1][mats0]['retract'][y]
+                z, g1, _ = parent['retract'][y]
             if not find_node: # Abridged operation
                 mats1 = mats0 + (z,)
                 ans.append((mats1, g0*g1))
@@ -304,17 +312,14 @@ class OrbitLookupTree():
         Outputs the order of the group and a short generating sequence.
         """
         n = len(mats)
-        selfnmats = self[n][mats]
+        selfnmats = self[mats]['data']
         if selfnmats['stab'][0] > 0: # Already computed
             return selfnmats['stab']
-        if n == 0:
-            selfnmats['stab'] = (self.G_order, self.G_gens)
-            return selfnmats['stab']
-        parent = mats[:-1]
-        if self[n-1][parent]['stab'][0] == 1: # Parent has trivial stabilizer
+        parent = self[mats[:-1]]['data']
+        if parent['stab'][0] == 1: # Parent has trivial stabilizer
             G1_gap = G.subgroup([]).gap()
         else:
-            retract = self[n-1][parent]['retract']
+            retract = parent['retract']
             G1_gap = retract.stabilizer(mats[-1], gap=True)
         G2_gap = G1_gap.ClosureGroup(selfnmats['stab'][1])
         order = G2_gap.Size().sage()
@@ -326,13 +331,12 @@ class OrbitLookupTree():
         """
         Construct the Cayley group retract attached to a node.
         """
-        n = len(mats)
         order, gens = self.stabilizer(mats)
         vertices, action = self.residual_action(mats)
         if order > 1:
             retract = CayleyGroupRetract(self.G, vertices, action, self.optimized_rep, gens=gens, order=order)
-            self[n][mats]['retract'] = retract
-        self[n][mats]['gpel'] = {M: None for M in (vertices if order == 1 else retract.reps())}
+            self[mats]['data']['retract'] = retract
+        self[mats]['data']['gpel'] = {M: None for M in (vertices if order == 1 else retract.reps())}
 
     def predicted_count(self, n):
         """
@@ -344,7 +348,7 @@ class OrbitLookupTree():
         """
         Compute retracts at the bottom level of the tree.
         """
-        n = self.depth()
+        n = self.depth
         if verbose:
             print("Original depth: {}".format(n))
         check_count = 0
@@ -361,7 +365,7 @@ class OrbitLookupTree():
             if check_count != self.predicted_count(n):
                 raise RuntimeError("Error in orbit-stabilizer formula")
         if verbose:
-            count = sum(len(self[n][mats]['gpel']) for mats in self.orbit_reps(n))
+            count = sum(len(self[mats]['data']['gpel']) for mats in self.orbit_reps(n))
             print("Number of nodes in retracts: {}".format(count))
 
     def apply_transporter(self, M, mats):
@@ -374,33 +378,32 @@ class OrbitLookupTree():
         """
         Create nodes at a new level of the tree.
         """
-        n = self.depth()
-        selfn = self[n]
-        self.tree[n+1] = {}
+        n = self.depth
+        self.depth = n+1
         transporters = self.transporters(n+1)
-        for mats0 in selfn:
-            for z, _ in selfn[mats0]['gpel'].items():
+        for mats0 in self.orbit_reps(n):
+            for z, _ in self[mats0]['data']['gpel'].items():
                 if _ is not None: # Already encountered this node
                     continue
                 mats = mats0 + (z,)
                 tmp = [self.apply_transporter(t, mats) for t in transporters]
                 tmp2 = self._orbit_rep(tmp, n+1, find_node=False)
                 if self.forbid and (any(i[0] is None for i in tmp2) or self.forbid(mats)):
-                    selfn[mats0]['gpel'][z] = ()
+                    self[mats0]['data']['gpel'][z] = ()
                     for (mats1, _) in tmp2:
                        if mats1 is not None:
-                             selfn[mats1[:-1]]['gpel'][mats1[-1]] = ()
+                             self[mats1[:-1]]['data']['gpel'][mats1[-1]] = ()
                 else:
-                    self[n+1][mats] = {'stab': (0, [])} # New node
-                    selfn[mats0]['gpel'][z] = (mats, self.identity)
+                    self[mats0][mats[-1]] = {'data': {'stab': (0, [])}} # New node
+                    self[mats0]['data']['gpel'][z] = (mats, self.identity)
                     for mats1, g1 in tmp2:
                         if mats1 == mats:
-                            self[n+1][mats]['stab'][1].append(g1) # Stabilizer element
+                            self[mats]['data']['stab'][1].append(g1) # Stabilizer element
                         else:
-                            selfn[mats1[:-1]]['gpel'][mats1[-1]] = (mats, ~g1)
+                            self[mats1[:-1]]['data']['gpel'][mats1[-1]] = (mats, ~g1)
         if self.forbid: # Remove forbidden elements
-            for mats0 in selfn:
-                selfn[mats0]['gpel'] = {z: g for z, g in selfn[mats0]['gpel'].items() if g != ()}
+            for mats0 in self.orbit_reps(n):
+                self[mats0]['data']['gpel'] = {z: g for z, g in self[mats0]['data']['gpel'].items() if g != ()}
         if verbose:
             print("Number of new nodes: {}".format(sum(1 for _ in self.orbit_reps(n+1))))
             print("New level: {}".format(n+1))
@@ -410,7 +413,7 @@ class OrbitLookupTree():
         r"""
         Extend the tree to a new depth.
         """
-        while self.depth() < n:
+        while self.depth < n:
             self.retracts_at_new_level(verbose)
             self.create_new_nodes(verbose)
 
@@ -429,7 +432,7 @@ class LinearOrbitLookupTree(OrbitLookupTree):
             for a,b in zip(V.coordinates(x), section_on_basis):
                 y += a*b
             return as_immutable(y)
-        self[len(mats)][mats]['quot'] = section
+        self[mats]['data']['quot'] = section
         action = lambda g, x, section=section, action=self.action: section(action(g, x))
         return vertices, action
 
