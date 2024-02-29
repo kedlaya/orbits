@@ -165,9 +165,9 @@ class OrbitLookupTree():
     The internal tree is stored as ``self.tree``, but one can also index directly into ``self``.
     Each level ``self[k]`` is a dictionary keyed by a `k`-tuple, identified with nodes of the tree.
     Each value ``self[k][U]`` is a dictionary with the following keys:
-    - ``gpel`` (for `U` eligible): a pair `(U', g)` such that `U'` is a green node and `g(U') = U`.
-    - ``stab`` (for `U` green): the stabilizer of `U`.
-    - ``retract`` (for `U` green and `k<n`): a dictionary whose value at `y \in S \setminus U` (resp. `y \in S/U`) is an element `g \in G_U` such that `U \cup \{g^{-1}(y)\}` (resp. `\pi_U^{-1}(g^{-1}(y))`) is a red or green node.    
+    - ``gpel``: a dict of the form `z: (U', g)` where `g(U') = U \cup \{z\}`.
+    - ``stab``: the stabilizer of `U`.
+    - ``retract`` (for nontrivial stabilizer): a dictionary whose value at `y \in S \setminus U` is an element `g \in G_U` such that `U \cup \{g^{-1}(y)\}` is an orbit representative for `G_U`.    
     """
 
     def __init__(self, G, vertices, methods=None):
@@ -193,7 +193,7 @@ class OrbitLookupTree():
         self.forbid = methods['forbid'] if 'forbid' in methods else None
         self.identity = self.optimized_rep(G(1))
         S0 = tuple()
-        self.tree = {0: {S0: {'gpel': (S0, self.identity), 'stab': (0, [])}}}
+        self.tree = {0: {S0: {'stab': (0, [])}}}
 
         try:
             S = set(vertices)
@@ -225,15 +225,21 @@ class OrbitLookupTree():
         self[n][mats]['quot'] = lambda x: x    
         return vertices, action
 
-    def green_nodes(self, n):
+    def orbit_reps(self, n):
         r"""
-        Return an iterator over green nodes (orbit representatives) at depth `n`.
+        Return an iterator over orbit representatives at depth `n`.
         """
         for mats, selfnmats in self[n].items():
             if 'stab' in selfnmats:
                 yield mats
 
-    def _orbit_rep(self, l, n, find_green=True):
+    def count_orbit_reps(self, n):
+        r"""
+        Return the number of orbit representatives at depth `n`.
+        """
+        return sum(1 for _ in self.orbit_reps(n))
+
+    def _orbit_rep(self, l, n, find_node=True):
         """
         Find orbit representatives for a list of tuples.
 
@@ -248,7 +254,7 @@ class OrbitLookupTree():
         cache = {}
         for mats0 in l0:
             if mats0 not in cache:
-                if mats0 in self[n-1] and 'stab' in self[n-1][mats0]: # Truncation is green
+                if mats0 in self[n-1]: # Truncation is an orbit rep
                     cache[mats0] = (mats0, self.identity)
                 else: # Truncation needs to be resolved
                     cache[mats0] = () # Record a dummy value to eliminate duplication in queue
@@ -259,27 +265,28 @@ class OrbitLookupTree():
         ans = []
         for mats in l:
             mats0, g0 = cache[mats[:-1]]
-            if mats0 is None: # Found an ineligible node
+            if mats0 is None: # Found an ineligible tuple
                 ans.append((None, None))
                 continue
+            parent = self[n-1][mats0]
             y = mats[-1] if g0 == self.identity else self.action(~g0, mats[-1])
-            y = self[n-1][mats0]['quot'](y) # Canonicalize representative
-            if self[n-1][mats0]['stab'][0] == 1: # Trivial stabilizer, no retract needed
+            y = parent['quot'](y) # Canonicalize representative
+            if parent['stab'][0] == 1: # Trivial stabilizer, no retract needed
                 z = y
                 g1 = self.identity
             else:
                 z, g1, _ = self[n-1][mats0]['retract'][y]
-            mats1 = mats0 + (z,)
-            if not find_green: # Abridged operation
+            if not find_node: # Abridged operation
+                mats1 = mats0 + (z,)
                 ans.append((mats1, g0*g1))
-            elif mats1 not in self[n]: # Found an ineligible node
+            elif z not in parent['gpel']: # Found an ineligible tuple
                 ans.append((None, None))
             else:
-                mats2, g2 = self[n][mats1]['gpel']
+                mats2, g2 = parent['gpel'][z]
                 ans.append((mats2, g0*g1*g2))
         return ans
     
-    def orbit_rep(self, mats):
+    def orbit_rep_lookup(self, mats):
         """
         Find the orbit representative for a given tuple.
         
@@ -315,9 +322,9 @@ class OrbitLookupTree():
         selfnmats['stab'] = (order, optimized_gens)
         return selfnmats['stab']
 
-    def construct_children(self, mats):
+    def construct_retract(self, mats):
         """
-        Construct the children of a green node using a Cayley group retract.
+        Construct the Cayley group retract attached to a node.
         """
         n = len(mats)
         order, gens = self.stabilizer(mats)
@@ -325,11 +332,7 @@ class OrbitLookupTree():
         if order > 1:
             retract = CayleyGroupRetract(self.G, vertices, action, self.optimized_rep, gens=gens, order=order)
             self[n][mats]['retract'] = retract
-        for M in (vertices if order == 1 else retract.reps()):
-            if M in mats:
-                raise ValueError("Found repeated entry in tuple")
-            mats1 = mats + (M,)
-            self[n+1][mats1] = {}
+        self[n][mats]['gpel'] = {M: None for M in (vertices if order == 1 else retract.reps())}
 
     def predicted_count(self, n):
         """
@@ -337,21 +340,20 @@ class OrbitLookupTree():
         """
         return binomial(len(self.V), n)
 
-    def nodes_at_new_level(self, verbose=False):
+    def retracts_at_new_level(self, verbose=False):
         """
-        Compute nodes at a new level of the tree (without classifying them).
+        Compute retracts at the bottom level of the tree.
         """
         n = self.depth()
         if verbose:
             print("Original depth: {}".format(n))
-        self.tree[n+1] = {}
         check_count = 0
-        for mats in self.green_nodes(n):
+        for mats in self.orbit_reps(n):
             order, _ = self.stabilizer(mats)
             if not self.forbid:
                 assert self.G_order % order == 0
                 check_count += self.G_order // order
-            self.construct_children(mats)
+            self.construct_retract(mats)
             if verbose:
                 print("Constructed children of a node with stabilizer order {}".format(order))
         # If no forbidden vertices, check the orbit-stabilizer formula.
@@ -359,7 +361,8 @@ class OrbitLookupTree():
             if check_count != self.predicted_count(n):
                 raise RuntimeError("Error in orbit-stabilizer formula")
         if verbose:
-            print("Number of new nodes: {}".format(len(self[n+1])))
+            count = sum(len(self[n][mats]['gpel']) for mats in self.orbit_reps(n))
+            print("Number of nodes in retracts: {}".format(count))
 
     def apply_transporter(self, M, mats):
         return tuple(mats[M[i]] for i in range(len(mats)))
@@ -367,38 +370,40 @@ class OrbitLookupTree():
     def transporters(self, n):
         return [binary_search_sort(n, j) for j in range(n-1)]
 
-    def classify_nodes(self, verbose=False):
+    def create_new_nodes(self, verbose=False):
         """
-        Classify nodes at the last level of the tree.
+        Create nodes at a new level of the tree.
         """
         n = self.depth()
         selfn = self[n]
-        transporters = self.transporters(n)
-        for mats in selfn:
-            if 'gpel' in selfn[mats]: # Already encountered this node
-                continue
-            tmp = [self.apply_transporter(t, mats) for t in transporters]
-            tmp2 = self._orbit_rep(tmp, n, find_green=False)
-            if self.forbid and (any(i[0] is None for i in tmp2) or self.forbid(mats)):
-                selfn[mats]['gpel'] = None
-                for (mats1, _) in tmp2:
-                    if mats1 is not None:
-                        selfn[mats1]['gpel'] = None
-            else:
-                selfn[mats]['gpel'] = (mats, self.identity)
-                selfn[mats]['stab'] = (0, [])
-                for mats1, g1 in tmp2:
-                    if mats1 == mats:
-                        selfn[mats]['stab'][1].append(g1) # Stabilizer element
-                    else:
-                        selfn[mats1]['gpel'] = (mats, ~g1)
-        if self.forbid: # Remove black nodes
-            nodes_to_delete = [mats for mats in selfn if selfn[mats]['gpel'] is None]
-            for mats in nodes_to_delete:
-                del selfn[mats]
+        self.tree[n+1] = {}
+        transporters = self.transporters(n+1)
+        for mats0 in selfn:
+            for z, _ in selfn[mats0]['gpel'].items():
+                if _ is not None: # Already encountered this node
+                    continue
+                mats = mats0 + (z,)
+                tmp = [self.apply_transporter(t, mats) for t in transporters]
+                tmp2 = self._orbit_rep(tmp, n+1, find_node=False)
+                if self.forbid and (any(i[0] is None for i in tmp2) or self.forbid(mats)):
+                    selfn[mats0]['gpel'][z] = ()
+                    for (mats1, _) in tmp2:
+                       if mats1 is not None:
+                             selfn[mats1[:-1]]['gpel'][mats1[-1]] = ()
+                else:
+                    self[n+1][mats] = {'stab': (0, [])} # New node
+                    selfn[mats0]['gpel'][z] = (mats, self.identity)
+                    for mats1, g1 in tmp2:
+                        if mats1 == mats:
+                            self[n+1][mats]['stab'][1].append(g1) # Stabilizer element
+                        else:
+                            selfn[mats1[:-1]]['gpel'][mats1[-1]] = (mats, ~g1)
+        if self.forbid: # Remove forbidden elements
+            for mats0 in selfn:
+                selfn[mats0]['gpel'] = {z: g for z, g in selfn[mats0]['gpel'].items() if g != ()}
         if verbose:
-            print("Number of new green nodes: {}".format(sum(1 for _ in self.green_nodes(n))))
-            print("New level: {}".format(n))
+            print("Number of new nodes: {}".format(sum(1 for _ in self.orbit_reps(n+1))))
+            print("New level: {}".format(n+1))
             print()
 
     def extend(self, n, verbose=False):
@@ -406,8 +411,8 @@ class OrbitLookupTree():
         Extend the tree to a new depth.
         """
         while self.depth() < n:
-            self.nodes_at_new_level(verbose)
-            self.classify_nodes(verbose)
+            self.retracts_at_new_level(verbose)
+            self.create_new_nodes(verbose)
 
 class LinearOrbitLookupTree(OrbitLookupTree):
     r"""

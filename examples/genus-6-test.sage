@@ -22,5 +22,5 @@ tree = LinearOrbitLookupTree(G, S, methods)
 tree.extend(4, verbose=True)
 
 # Print stabilizers at level 3
-for mats in tree.green_nodes(3):
+for mats in tree.orbit_reps(3):
     print(tree.stabilizer(mats))

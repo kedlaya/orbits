@@ -7,7 +7,7 @@ def build_orbit_tree(G, S, n, methods, verbose=True, terminate=True):
     return tree
 
 def green_nodes(tree, n):
-    return list(tree.green_nodes(n))
+    return list(tree.orbit_reps(n))
 
 def orbit_rep_from_tree(G, tree, mats, apply_group_elem=None, optimized_rep=None, find_green=True):
     return tree.orbit_rep(mats)
