@@ -249,7 +249,6 @@ class OrbitLookupTree():
         """
         Compute the residual action associated to a node.
         """
-        n = len(mats)
         vertices = [M for M in self.V if M not in mats]
         action = self.action
         if sub is None:
@@ -268,8 +267,7 @@ class OrbitLookupTree():
         ans = []
         # Prepare truncations for recursive classification.
         l = list(l)
-        l0 = [mats[:-1] for mats in l]
-        cache = list(set(l0))
+        cache = list(set(mats[:-1] for mats in l))
         # Run the recursion and file the results.
         cache = dict(zip(cache, self._orbit_rep(cache, n-1)))
         # Finish with retracts.
@@ -280,7 +278,7 @@ class OrbitLookupTree():
                 ans.append((None, None))
                 continue
             parent = self[mats0]['data']
-            y = mats[-1] if g0 == self.identity else self.action(~g0, mats[-1])
+            y = self.action(~g0, mats[-1])
             y = parent['quot'](y) # Canonicalize representative
             if parent['stab'][0] == 1: # Trivial stabilizer, no retract needed
                 z = y
@@ -322,8 +320,7 @@ class OrbitLookupTree():
         if parent['stab'][0] == 1: # Parent has trivial stabilizer
             G1_gap = G.subgroup([]).gap()
         else:
-            retract = parent['retract']
-            G1_gap = retract.stabilizer(mats[-1], gap=True)
+            G1_gap = parent['retract'].stabilizer(mats[-1], gap=True)
         G2_gap = G1_gap.ClosureGroup(selfnmats['stab'][1])
         order = G2_gap.Size().sage()
         optimized_gens = [self.optimized_rep(g) for g in G2_gap.SmallGeneratingSet()]
@@ -364,11 +361,10 @@ class OrbitLookupTree():
             if verbose:
                 print("Constructed children of a node with stabilizer order {}".format(order))
         # If no forbidden vertices, check the orbit-stabilizer formula.
-        if not self.forbid:
-            if check_count != self.predicted_count(n):
-                raise RuntimeError("Error in orbit-stabilizer formula")
+        if not self.forbid and check_count != self.predicted_count(n):
+            raise RuntimeError("Error in orbit-stabilizer formula")
         if verbose:
-            count = sum(len(self[mats]['data']['gpel']) for mats in self.orbit_reps(n))
+            count = sum(len(sub['data']['gpel']) for _, sub in self.orbit_reps(n, with_tree=True))
             print("Number of nodes in retracts: {}".format(count))
 
     def apply_transporter(self, M, mats):
@@ -394,19 +390,18 @@ class OrbitLookupTree():
                 if self.forbid and (any(i[0] is None for i in tmp2) or self.forbid(mats)):
                     sub['data']['gpel'][z] = ()
                     for (mats1, _) in tmp2:
-                       if mats1 is not None:
-                             self[mats1[:-1]]['data']['gpel'][mats1[-1]] = ()
+                        if mats1 is not None:
+                            self[mats1[:-1]]['data']['gpel'][mats1[-1]] = ()
                 else:
                     l = []
-                    sub[mats[-1]] = {'data': {'stab': (0, l)}} # New node
+                    sub[z] = {'data': {'stab': (0, l)}} # New node
                     sub['data']['gpel'][z] = (mats, self.identity)
                     for mats1, g1 in tmp2:
                         if mats1 == mats:
                             l.append(g1) # Stabilizer element
                         else:
                             self[mats1[:-1]]['data']['gpel'][mats1[-1]] = (mats, ~g1)
-        if self.forbid: # Remove forbidden elements
-            for mats0, sub in self.orbit_reps(n, with_tree=True):
+            if self.forbid: # Remove forbidden elements
                 sub['data']['gpel'] = {z: g for z, g in sub['data']['gpel'].items() if g != ()}
         if verbose:
             print("Number of new nodes: {}".format(sum(1 for _ in self.orbit_reps(n+1))))
@@ -425,7 +420,7 @@ class LinearOrbitLookupTree(OrbitLookupTree):
     r"""
     Class for linear orbit lookup trees.
     """
-    def residual_action(self, mats):
+    def residual_action(self, mats, sub=None):
         quot = self.V.quotient(self.V.subspace(mats))
         lifts = [quot.lift(v) for v in quot.basis()]
         W = VectorSpace(GF(2), quot.dimension())
@@ -436,7 +431,9 @@ class LinearOrbitLookupTree(OrbitLookupTree):
             for a,b in zip(V.coordinates(x), section_on_basis):
                 y += a*b
             return as_immutable(y)
-        self[mats]['data']['quot'] = section
+        if sub is None:
+            sub = self[mats]
+        sub['data']['quot'] = section
         action = lambda g, x, section=section, action=self.action: section(action(g, x))
         return vertices, action
 

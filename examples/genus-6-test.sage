@@ -19,7 +19,7 @@ methods = {'action': lambda g, x: as_immutable(g*x),
 
 S = VectorSpace(F, 10)
 tree = LinearOrbitLookupTree(G, S, methods)
-tree.extend(4, verbose=True)
+tree.extend(5, verbose=True)
 
 # Print stabilizers at level 3
 for mats in tree.orbit_reps(3):
