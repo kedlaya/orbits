@@ -88,7 +88,9 @@ class CayleyGroupRetract():
             if v not in d:
                 d[v] = (v, iden, 0)
                 orbit_len = dfs(neighbors, d, v)
-        self.d = d
+        # Avoid using fresh copies of elements of S.
+        self.d = {v: d[v] for v in S}
+        self.d.update({v: d[v] for v in d if v not in self.d})
 
     def __getitem__(self, key):
         return self.d[key]
@@ -185,6 +187,7 @@ class OrbitLookupTree():
         self.G = G
         self.G_order = G.order()
         self.V = vertices
+        self.S = {v: v for v in self.V} # Use this to find canonical copies in memory
         
         if methods is None:
             methods = {}
@@ -194,14 +197,9 @@ class OrbitLookupTree():
         self.identity = self.optimized_rep(G(1))
         self.depth = 0
 
-        try:
-            S = set(vertices)
-        except TypeError:
-            S = vertices
-        assert "data" not in S
         self.G_gens = [self.optimized_rep(g) for g in random_generating_sequence(G)]
         for g in self.G_gens:
-            assert all(self.action(g, x) in S for x in S)
+            assert all(self.action(g, x) in vertices for x in vertices)
         self.tree = {'data': {'stab': (self.G_order, self.G_gens)}}
 
     def __getitem__(self, key):
@@ -244,6 +242,9 @@ class OrbitLookupTree():
         """
         return sum(1 for _ in self.orbit_reps(n))
 
+    def canonicalize(self, x):
+        return self.S[x]
+
     def residual_action(self, mats, sub=None):
         """
         Compute the residual action associated to a node.
@@ -252,7 +253,7 @@ class OrbitLookupTree():
         action = self.action
         if sub is None:
             sub = self[mats]
-        sub['data']['quot'] = lambda x: x
+        sub['data']['quot'] = self.canonicalize
         return vertices, action
 
     def _orbit_rep(self, l, n, find_node=True):
@@ -350,6 +351,7 @@ class OrbitLookupTree():
         if verbose:
             print("Original depth: {}".format(n))
         check_count = 0
+        node_count = 0
         for (mats, sub) in self.orbit_reps(n, with_tree=True):
             order, _ = self.stabilizer(mats, sub)
             if not self.forbid:
@@ -357,7 +359,8 @@ class OrbitLookupTree():
                 check_count += self.G_order // order
             self.construct_retract(mats, sub)
             if verbose:
-                print("Constructed children of a node with stabilizer order {}".format(order))
+                node_count += 1
+                print("Computed a retract with stabilizer order {} (count: {})".format(order, node_count))
         # If no forbidden vertices, check the orbit-stabilizer formula.
         if not self.forbid and check_count != self.predicted_count(n):
             raise RuntimeError("Error in orbit-stabilizer formula")
@@ -422,13 +425,15 @@ class LinearOrbitLookupTree(OrbitLookupTree):
         quot = self.V.quotient(self.V.subspace(mats))
         lifts = [quot.lift(v) for v in quot.basis()]
         W = VectorSpace(GF(2), quot.dimension())
-        vertices = [as_immutable(sum(i*j for i,j in zip(lifts, W.coordinates(w)))) for w in W if w]
+
+        # Generate elements of the quotient space represented by canonical elements of V.
+        vertices = [self.S[as_immutable(sum(i*j for i,j in zip(lifts, W.coordinates(w))))] for w in W if w]
         section_on_basis = [quot.lift(quot(v)) for v in self.V.basis()]
-        def section(x, section_on_basis=section_on_basis, V=self.V):
+        def section(x, section_on_basis=section_on_basis, V=self.V, S=self.S):
             y = V(0)
             for a,b in zip(V.coordinates(x), section_on_basis):
                 y += a*b
-            return as_immutable(y)
+            return S[as_immutable(y)]
         if sub is None:
             sub = self[mats]
         sub['data']['quot'] = section
@@ -441,7 +446,7 @@ class LinearOrbitLookupTree(OrbitLookupTree):
 
     def apply_transporter(self, M, mats):
         n = len(mats)
-        return tuple(as_immutable(sum(M[i,j]*mats[j] for j in range(n))) for i in range(n))
+        return tuple(self.S[as_immutable(sum(M[i,j]*mats[j] for j in range(n)))] for i in range(n))
 
     def transporters(self, n):
         cache = []
