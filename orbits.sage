@@ -187,7 +187,11 @@ class OrbitLookupTree():
         self.G = G
         self.G_order = G.order()
         self.V = vertices
-        self.S = {v: v for v in self.V} # Use this to find canonical copies in memory
+        try:
+            self.S = {v: v for v in self.V}
+        except TypeError:
+            S = [as_immutable(v) for v in self.V]
+            self.S = {v: v for v in S}
         
         if methods is None:
             methods = {}
@@ -242,19 +246,17 @@ class OrbitLookupTree():
         """
         return sum(1 for _ in self.orbit_reps(n))
 
-    def canonicalize(self, x):
+    def canonicalize(self, x, data=None):
         return self.S[x]
 
-    def residual_action(self, mats, sub=None):
+    def residual_vertices(self, mats, sub=None):
+        return [M for M in self.V if M not in mats]
+
+    def residual_action(self, mats, data=None):
         """
         Compute the residual action associated to a node.
         """
-        vertices = [M for M in self.V if M not in mats]
-        action = self.action
-        if sub is None:
-            sub = self[mats]
-        sub['data']['quot'] = self.canonicalize
-        return vertices, action
+        return self.action
 
     def _orbit_rep(self, l, n, find_node=True):
         """
@@ -276,9 +278,9 @@ class OrbitLookupTree():
             if mats0 is None: # Found an ineligible tuple
                 ans.append((None, None))
                 continue
-            parent = self[mats0]['data']
             y = self.action(~g0, mats[-1])
-            y = parent['quot'](y) # Canonicalize representative
+            parent = self[mats0]['data']
+            y = self.canonicalize(y, parent)
             if parent['stab'][0] == 1: # Trivial stabilizer, no retract needed
                 z = y
                 g1 = self.identity
@@ -331,7 +333,8 @@ class OrbitLookupTree():
         Construct the Cayley group retract attached to a node.
         """
         order, gens = self.stabilizer(mats, sub)
-        vertices, action = self.residual_action(mats, sub)
+        vertices = self.residual_vertices(mats, sub)
+        action = self.residual_action(mats, sub)
         if order > 1:
             retract = CayleyGroupRetract(self.G, vertices, action, self.optimized_rep, gens=gens, order=order)
             sub['data']['retract'] = retract
@@ -421,24 +424,32 @@ class LinearOrbitLookupTree(OrbitLookupTree):
     r"""
     Class for linear orbit lookup trees.
     """
-    def residual_action(self, mats, sub=None):
+    def residual_vertices(self, mats, sub=None):
         quot = self.V.quotient(self.V.subspace(mats))
-        lifts = [quot.lift(v) for v in quot.basis()]
-        W = VectorSpace(GF(2), quot.dimension())
-
-        # Generate elements of the quotient space represented by canonical elements of V.
-        vertices = [self.S[as_immutable(sum(i*j for i,j in zip(lifts, W.coordinates(w))))] for w in W if w]
-        section_on_basis = [quot.lift(quot(v)) for v in self.V.basis()]
-        def section(x, section_on_basis=section_on_basis, V=self.V, S=self.S):
-            y = V(0)
-            for a,b in zip(V.coordinates(x), section_on_basis):
-                y += a*b
-            return S[as_immutable(y)]
+        section_on_basis = tuple(self.S[quot.lift(quot(v))] for v in self.V.basis())
         if sub is None:
             sub = self[mats]
-        sub['data']['quot'] = section
-        action = lambda g, x, section=section, action=self.action: section(action(g, x))
-        return vertices, action
+        sub['data']['section_on_basis'] = section_on_basis        
+        lifts = [quot.lift(v) for v in quot.basis()]
+        W = VectorSpace(GF(2), quot.dimension())
+        return [self.S[as_immutable(sum(i*j for i,j in zip(lifts, W.coordinates(w))))] for w in W if w]
+
+    def canonicalize(self, x, data=None):
+        y = self.V(0)
+        for a,b in zip(self.V.coordinates(x), data['section_on_basis']):
+            y += a*b
+        return self.S[as_immutable(y)]
+
+    def section(self, x, section_on_basis):
+        y = self.V(0)
+        for a,b in zip(self.V.coordinates(x), section_on_basis):
+            y += a*b
+        return self.S[as_immutable(y)]
+
+    def residual_action(self, mats, sub=None):
+        if sub is None:
+            sub = self[mats]
+        return lambda g, x, action=self.action, data=sub['data']: self.canonicalize(action(g, x), data)
 
     def predicted_count(self, n):
         dim = self.V.dimension()
