@@ -187,11 +187,7 @@ class OrbitLookupTree():
         self.G = G
         self.G_order = G.order()
         self.V = vertices
-        try:
-            self.S = {v: v for v in self.V}
-        except TypeError:
-            S = [as_immutable(v) for v in self.V]
-            self.S = {v: v for v in S}
+        self.initialize_vertices()
         
         if methods is None:
             methods = {}
@@ -205,6 +201,14 @@ class OrbitLookupTree():
         for g in self.G_gens:
             assert all(self.action(g, x) in vertices for x in vertices)
         self.tree = {'data': {'stab': (self.G_order, self.G_gens)}}
+        
+    def initialize_vertices(self):
+        """
+        Create a canonical copy of the action set.
+        
+        This eliminates the creation in memory of many copies of the same elements.
+        """
+        self.S = {v: v for v in self.V}   
 
     def __getitem__(self, key):
         if self.depth < len(key):
@@ -247,9 +251,15 @@ class OrbitLookupTree():
         return sum(1 for _ in self.orbit_reps(n))
 
     def canonicalize(self, x, data=None):
+        """
+        Return a canonical copy of x relative to a particular node.
+        """
         return self.S[x]
 
     def residual_vertices(self, mats, sub=None):
+        """
+        Compute the action set for the residual action associated to a node.
+        """
         return [M for M in self.V if M not in mats]
 
     def residual_action(self, mats, data=None):
@@ -424,9 +434,13 @@ class LinearOrbitLookupTree(OrbitLookupTree):
     r"""
     Class for linear orbit lookup trees.
     """
+    def initialize_vertices(self):
+        S = [as_immutable(v) for v in self.V]
+        self.S = {v: v for v in S}
+
     def residual_vertices(self, mats, sub=None):
         quot = self.V.quotient(self.V.subspace(mats))
-        section_on_basis = tuple(self.S[quot.lift(quot(v))] for v in self.V.basis())
+        section_on_basis = tuple(self.S[as_immutable(quot.lift(quot(v)))] for v in self.V.basis())
         if sub is None:
             sub = self[mats]
         sub['data']['section_on_basis'] = section_on_basis        
@@ -437,12 +451,6 @@ class LinearOrbitLookupTree(OrbitLookupTree):
     def canonicalize(self, x, data=None):
         y = self.V(0)
         for a,b in zip(self.V.coordinates(x), data['section_on_basis']):
-            y += a*b
-        return self.S[as_immutable(y)]
-
-    def section(self, x, section_on_basis):
-        y = self.V(0)
-        for a,b in zip(self.V.coordinates(x), section_on_basis):
             y += a*b
         return self.S[as_immutable(y)]
 
