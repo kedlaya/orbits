@@ -1,4 +1,5 @@
 import random
+from itertools import product
 load("bfs.pyx")
 
 def random_generating_sequence(G):
@@ -200,7 +201,7 @@ class OrbitLookupTree():
 
         self.G_gens = [self.optimized_rep(g) for g in random_generating_sequence(G)]
         for g in self.G_gens:
-            assert all(self.action(g, x) in vertices for x in vertices)
+            assert all(self.action(g, x) in self.S for x in self.S)
         self.tree = {'data': {'stab': (self.G_order, self.G_gens)}}
         
     def initialize_vertices(self):
@@ -265,7 +266,7 @@ class OrbitLookupTree():
         """
         return [M for M in self.V if M not in mats]
 
-    def residual_action(self, mats, data=None):
+    def residual_action(self, mats, sub=None):
         """
         Compute the residual action associated to a node.
         """
@@ -449,14 +450,13 @@ class LinearOrbitLookupTree(OrbitLookupTree):
             sub = self[mats]
         sub['data']['section_on_basis'] = section_on_basis        
         lifts = [quot.lift(v) for v in quot.basis()]
-        W = VectorSpace(GF(2), quot.dimension())
-        return [self.S[as_immutable(sum(i*j for i,j in zip(lifts, W.coordinates(w))))] for w in W if w]
+        S = self.S
+        d = quot.dimension()
+        F = self.V.base_field()
+        return [S[as_immutable(fastsum(i*j for i,j in zip(lifts, t)))] for t in product(F, repeat=d) if any(i for i in t)]
 
     def canonicalize(self, x, data=None):
-        y = self.V(0)
-        for a,b in zip(self.V.coordinates(x), data['section_on_basis']):
-            y += a*b
-        return self.S[as_immutable(y)]
+        return self.S[as_immutable(fastsum(a*b for a,b in zip(self.V.coordinates(x), data['section_on_basis'])))]
 
     def residual_action(self, mats, sub=None):
         if sub is None:
@@ -469,7 +469,7 @@ class LinearOrbitLookupTree(OrbitLookupTree):
 
     def apply_transporter(self, M, mats):
         n = len(mats)
-        return tuple(self.S[as_immutable(sum(M[i,j]*mats[j] for j in range(n)))] for i in range(n))
+        return tuple(self.S[as_immutable(fastsum(M[i,j]*mats[j] for j in range(n)))] for i in range(n))
 
     def transporters(self, n):
         cache = []

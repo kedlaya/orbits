@@ -7,6 +7,12 @@ def as_immutable(vec):
     vec.set_immutable()
     return vec
 
+def fastsum(gen):
+    c = None
+    for x in gen:
+        c = x if c is None else c+x
+    return c
+
 def dfs(neighbors, dict d, v0):
     """
     Perform a depth-first search of a directed graph (specified by ``neighbors``).
