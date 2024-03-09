@@ -7,10 +7,10 @@ def as_immutable(vec):
     vec.set_immutable()
     return vec
 
-def fastsum(gen):
+def sumprod(gen):
     c = None
-    for x in gen:
-        c = x if c is None else c+x
+    for a, b in gen:
+        c = a*b if c is None else c+a*b
     return c
 
 def dfs(neighbors, dict d, v0):

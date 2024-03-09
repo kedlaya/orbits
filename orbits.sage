@@ -442,6 +442,10 @@ class LinearOrbitLookupTree(OrbitLookupTree):
     def initialize_vertices(self):
         S = [as_immutable(v) for v in self.V]
         self.S = {v: v for v in S}
+        if self.V.ambient_vector_space() is self.V:
+            self.coords = lambda x: x
+        else:
+            self.coords = lambda x, V=self.V: V.coordinate_vector(x)
 
     def residual_vertices(self, mats, sub=None):
         quot = self.V.quotient(self.V.subspace(mats))
@@ -453,10 +457,10 @@ class LinearOrbitLookupTree(OrbitLookupTree):
         S = self.S
         d = quot.dimension()
         F = self.V.base_field()
-        return [S[as_immutable(fastsum(i*j for i,j in zip(lifts, t)))] for t in product(F, repeat=d) if any(i for i in t)]
+        return [S[as_immutable(sumprod(zip(lifts, t)))] for t in product(F, repeat=d) if any(i for i in t)]
 
     def canonicalize(self, x, data=None):
-        return self.S[as_immutable(fastsum(a*b for a,b in zip(self.V.coordinates(x), data['section_on_basis'])))]
+        return self.S[as_immutable(sumprod(zip(self.coords(x), data['section_on_basis'])))]
 
     def residual_action(self, mats, sub=None):
         if sub is None:
@@ -469,7 +473,7 @@ class LinearOrbitLookupTree(OrbitLookupTree):
 
     def apply_transporter(self, M, mats):
         n = len(mats)
-        return tuple(self.S[as_immutable(fastsum(M[i,j]*mats[j] for j in range(n)))] for i in range(n))
+        return tuple(self.S[as_immutable(sumprod((M[i,j], mats[j]) for j in range(n)))] for i in range(n))
 
     def transporters(self, n):
         cache = []
