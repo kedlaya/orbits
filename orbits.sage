@@ -1,5 +1,6 @@
 import random
 from itertools import product
+from sage.misc.lazy_attribute import lazy_attribute
 load("bfs.pyx")
 
 def random_generating_sequence(G):
@@ -72,6 +73,7 @@ class CayleyGroupRetract():
     """
     def __init__(self, G, S, action, optimized_rep=None, check_closure=False, order=None, gens=None):
         self.G = G
+        self._S = S # temporary
         self.action = action
         self.optimized_rep = optimized_rep if optimized_rep else (lambda g: g)
         self.gens = [self.optimized_rep(g) for g in random_generating_sequence(G)] if gens is None else gens
@@ -81,17 +83,22 @@ class CayleyGroupRetract():
             vertex_set = set(S)
             assert all(action(g, v) in vertex_set for g in self.gens for v in vertex_set)
 
+    @lazy_attribute
+    def d(self):
         # Conduct a breadth-first search.
         d = {}
-        iden = self.optimized_rep(G.one())
+        iden = self.optimized_rep(self.G.one())
         neighbors = lambda M, action=self.action, gens=self.gens: ((action(g, M), g) for g in gens)
-        for v in S:
+        for v in self._S:
             if v not in d:
                 d[v] = (v, iden, 0)
-                orbit_len = dfs(neighbors, d, v)
+                dfs(neighbors, d, v)
         # Avoid using fresh copies of elements of S.
-        self.d = {v: d[v] for v in S}
-        self.d.update({v: d[v] for v in d if v not in self.d})
+        d1 = {v: d[v] for v in self._S}
+        if len(d1) < len(d): # Failure of closure
+            d1.update({v: d[v] for v in d if v not in d1})
+        del self._S
+        return d1
 
     def __getitem__(self, key):
         return self.d[key]
@@ -254,23 +261,17 @@ class OrbitLookupTree():
         """
         return sum(1 for _ in self.orbit_reps(n))
 
-    def canonicalize(self, x, data=None):
-        """
-        Return a canonical copy of x relative to a particular node.
-        """
-        return self.S[x]
-
     def residual_vertices(self, mats, sub=None):
         """
         Compute the action set for the residual action associated to a node.
         """
         return [M for M in self.V if M not in mats]
 
-    def residual_action(self, mats, sub=None):
+    def lift(self, x, data):
         """
-        Compute the residual action associated to a node.
+        Return a representative of the quotient relative to a particular node.
         """
-        return self.action
+        return x
 
     def _orbit_rep(self, l, n, find_node=True):
         """
@@ -281,8 +282,8 @@ class OrbitLookupTree():
         if n == 0:
             return [(mats, self.identity) for mats in l]
         # Prepare truncations for recursive classification.
-        l = list(l)
-        cache = list(set(mats[:-1] for mats in l))
+        l = tuple(l)
+        cache = tuple(set(mats[:-1] for mats in l))
         # Run the recursion and file the results.
         cache = dict(zip(cache, self._orbit_rep(cache, n-1)))
         # Finish with retracts.
@@ -292,9 +293,8 @@ class OrbitLookupTree():
             if mats0 is None: # Found an ineligible tuple
                 ans.append((None, None))
                 continue
-            y = self.action(~g0, mats[-1])
             parent = self[mats0]['data']
-            y = self.canonicalize(y, parent)
+            y = self.lift(self.action(~g0, mats[-1]), parent)
             if parent['stab'][0] == 1: # Trivial stabilizer, no retract needed
                 z = y
                 g1 = self.identity
@@ -348,8 +348,10 @@ class OrbitLookupTree():
         Construct the Cayley group retract attached to a node.
         """
         order, gens = self.stabilizer(mats, sub)
-        vertices = self.residual_vertices(mats, sub)
-        action = self.residual_action(mats, sub)
+        S = self.S
+        vertices = [self.S[M] for M in self.residual_vertices(mats, sub)]
+        action = lambda g, x, action=self.action, lift=self.lift, data=sub['data']: lift(action(g, x), data)
+
         if order > 1:
             retract = CayleyGroupRetract(self.G, vertices, action, self.optimized_rep, gens=gens, order=order)
             sub['data']['retract'] = retract
@@ -449,31 +451,24 @@ class LinearOrbitLookupTree(OrbitLookupTree):
 
     def residual_vertices(self, mats, sub=None):
         quot = self.V.quotient(self.V.subspace(mats))
-        section_on_basis = tuple(self.S[as_immutable(quot.lift(quot(v)))] for v in self.V.basis())
+        section_on_basis = tuple(as_immutable(quot.lift(quot(v))) for v in self.V.basis())
         if sub is None:
             sub = self[mats]
         sub['data']['section_on_basis'] = section_on_basis        
         lifts = [quot.lift(v) for v in quot.basis()]
-        S = self.S
         d = quot.dimension()
         F = self.V.base_field()
-        return [S[as_immutable(sumprod(zip(lifts, t)))] for t in product(F, repeat=d) if any(i for i in t)]
+        return [sumprod(t, lifts) for t in product(F, repeat=d) if any(t)]
 
-    def canonicalize(self, x, data=None):
-        return self.S[as_immutable(sumprod(zip(self.coords(x), data['section_on_basis'])))]
-
-    def residual_action(self, mats, sub=None):
-        if sub is None:
-            sub = self[mats]
-        return lambda g, x, action=self.action, can=self.canonicalize, data=sub['data']: can(action(g, x), data)
+    def lift(self, x, data):
+        return sumprod(self.coords(x), data['section_on_basis'])
 
     def predicted_count(self, n):
         dim = self.V.dimension()
         return prod(2**(dim-i)-1 for i in range(n)) // prod(2**(n-i)-1 for i in range(n))
 
     def apply_transporter(self, M, mats):
-        n = len(mats)
-        return tuple(self.S[as_immutable(sumprod((M[i,j], mats[j]) for j in range(n)))] for i in range(n))
+        return tuple(sumprod(i, mats) for i in M.rows())
 
     def transporters(self, n):
         cache = []

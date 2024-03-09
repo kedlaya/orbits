@@ -7,11 +7,12 @@ def as_immutable(vec):
     vec.set_immutable()
     return vec
 
-def sumprod(gen):
+def sumprod(gen1, gen2):
     c = None
-    for a, b in gen:
-        c = a*b if c is None else c+a*b
-    return c
+    for a, b in zip(gen1, gen2):
+        if a:
+            c = a*b if c is None else c+a*b
+    return as_immutable(c)
 
 def dfs(neighbors, dict d, v0):
     """
