@@ -27,7 +27,7 @@ def dfs(neighbors, dict d, v0):
             d[v0] = d[v0][:2] + (count,)
             break
         for (x, g) in neighbors(w):
-            if x not in d:
+            if x not in d or d[x] is None:
                 u = (t[0], g*t[1], None)
                 d[x] = u
                 queue.append((x, u))
