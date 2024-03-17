@@ -24,22 +24,23 @@ def bfs(neighbors, list given_keys, iden):
     cdef long count
     cdef list queue
     for v in given_keys:
-        if d[v] is None:
-            d[v] = (v, iden)
-            count = 0
-            queue = [v]
-            while True:
-                try:
-                    w = queue[count]
-                except IndexError:
-                    break
-                count += 1
-                for (x, g) in neighbors(w):
-                    y = d.get(x, None)
-                    if y is None:
-                        d[x] = (v, g*d[w][1], None)
-                        queue.append(x)
-            d[v] = (v, iden, count)
+        if d[v] is not None:
+            continue
+        d[v] = (v, iden)
+        count = 0
+        queue = [v]
+        while True:
+            try:
+                w = queue[count]
+            except IndexError:
+                break
+            count += 1
+            for (x, g) in neighbors(w):
+                y = d.get(x, None)
+                if y is None:
+                    d[x] = (v, g*d[w][1], None)
+                    queue.append(x)
+        d[v] = (v, iden, count)
     return d
     
 
