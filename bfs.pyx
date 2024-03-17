@@ -10,7 +10,9 @@ def as_immutable(vec):
 def sumprod(gen1, gen2):
     c = None
     for a, b in zip(gen1, gen2):
-        if a:
+        if a == 1:
+            c = b if c is None else c+b
+        elif a:
             c = a*b if c is None else c+a*b
     return as_immutable(c)
 
