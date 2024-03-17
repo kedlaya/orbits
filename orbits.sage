@@ -92,12 +92,7 @@ class CayleyGroupRetract():
         # Conduct a depth-first search.
         iden = self.identity
         neighbors = lambda M, act=self.action, gens=self.gens: ((act(g, M), g) for g in gens)
-        d = dict.fromkeys(self._S)
-        for v in self._S:
-            if d[v] is None:
-                d[v] = (v, self.identity, 0)
-                orbit_len = bfs(neighbors, d, v)
-                d[v] = (v, self.identity, orbit_len)
+        d = bfs(neighbors, self._S, self.identity)
         del self._S
         return d
 
