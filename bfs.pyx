@@ -16,23 +16,22 @@ def sumprod(gen1, gen2):
             c = a*b if c is None else c+a*b
     return as_immutable(c)
 
-def dfs(neighbors, dict d, v0):
+def bfs(neighbors, dict d, v0):
     """
-    Perform a depth-first search of a directed graph (specified by ``neighbors``).
+    Perform a breadth-first search of a directed graph (specified by ``neighbors``).
     """
     cdef long count = 1
-    cdef list queue = [(v0, d[v0])]
+    cdef long i = 0
+    cdef list queue = [v0]
     while True:
         try:
-            w, t = queue.pop()
+            w = queue[i]
         except IndexError:
-            d[v0] = d[v0][:2] + (count,)
-            break
+            return len(queue)
+        i += 1
         for (x, g) in neighbors(w):
-            if x not in d or d[x] is None:
-                u = (t[0], g*t[1], None)
-                d[x] = u
-                queue.append((x, u))
-                count += 1
-
+            y = d.get(x, None)
+            if y is None:
+                d[x] = (v0, g*d[w][1], None)
+                queue.append(x)
 

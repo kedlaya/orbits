@@ -91,12 +91,13 @@ class CayleyGroupRetract():
     def d(self):
         # Conduct a depth-first search.
         iden = self.identity
-        neighbors = lambda M, action=self.action, gens=self.gens: ((action(g, M), g) for g in gens)
+        neighbors = lambda M, act=self.action, gens=self.gens: ((act(g, M), g) for g in gens)
         d = dict(zip(self._S, repeat(None)))
         for v in self._S:
             if d[v] is None:
-                d[v] = (v, iden, 0)
-                dfs(neighbors, d, v)
+                d[v] = (v, self.identity, 0)
+                orbit_len = bfs(neighbors, d, v)
+                d[v] = (v, self.identity, orbit_len)
         del self._S
         return d
 
@@ -153,8 +154,8 @@ class CayleyGroupRetract():
         g0inv = ~g0
         target_order = libgap(self.G_order // orbit_len)
         rgen = self.seed
-        e1 = v
-        mats1, g1, _ = d[v]
+        e1 = self.action(rgen, v)
+        mats1, g1, _ = d[e1]
         while True:
             # Produce random stabilizer elements until we hit the right order.
             rgen *= random.choice(gens)
@@ -299,7 +300,7 @@ class OrbitLookupTree():
                 continue
             parent = self[mats0]['data']
             y = self.lift(self.action(~g0, mats[-1]), parent)
-            if parent['stab'][0] == 1: # Trivial stabilizer, no retract needed
+            if parent['stab'][0] == 1: # Trivial stabilizer, no retract stored
                 z = y
                 g1 = self.identity
             else:
@@ -307,11 +308,12 @@ class OrbitLookupTree():
             if not find_node: # Abridged operation
                 mats1 = mats0 + (z,)
                 ans[mats] = (mats1, g0*g1)
-            elif z not in parent['gpel']: # Found an ineligible tuple
-                ans[mats] = (None, None)
             else:
-                mats2, g2 = parent['gpel'][z]
-                ans[mats] = (mats2, g0*g1*g2)
+                try:
+                    mats2, g2 = parent['gpel'][z]
+                    ans[mats] = (mats2, g0*g1*g2)
+                except KeyError: # Found an ineligible tuple
+                    ans[mats] = (None, None)
         return ans
     
     def orbit_rep_lookup(self, mats):
@@ -450,7 +452,9 @@ class LinearOrbitLookupTree(OrbitLookupTree):
     def initialize_vertices(self):
         S = [as_immutable(v) for v in self.V]
         self.S = dict(zip(S, S))
-        if self.V.ambient_vector_space() is self.V:
+        self.full = self.V.ambient_vector_space() is self.V
+        if self.full:
+            self.full = True
             self.coords = lambda x: x
         else:
             self.coords = lambda x, V=self.V: V.coordinate_vector(x)
@@ -461,13 +465,18 @@ class LinearOrbitLookupTree(OrbitLookupTree):
         section_on_basis = tuple(as_immutable(quot.lift(quot(v))) for v in self.V_basis)
         if sub is None:
             sub = self[mats]
-        sub['data']['section_on_basis'] = section_on_basis        
+        if self.full:
+            sub['data']['section_on_basis'] = Matrix(section_on_basis).transpose()
+        else:
+            sub['data']['section_on_basis'] = section_on_basis
         lifts = [quot.lift(v) for v in quot.basis()]
         d = quot.dimension()
         F = self.V.base_field()
         return (sumprod(t, lifts) for t in product(F, repeat=d) if any(t))
 
     def lift(self, x, data):
+        if self.full:
+            return as_immutable(data['section_on_basis']*x)
         return sumprod(self.coords(x), data['section_on_basis'])
 
     def predicted_count(self, n):
@@ -493,5 +502,4 @@ class LinearOrbitLookupTree(OrbitLookupTree):
             vecs.append(quot.lift(quot.basis()[0]))
             cache.append(Matrix(vecs))
         return cache
-
 
