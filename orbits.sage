@@ -1,5 +1,5 @@
 import random
-from itertools import product, repeat
+from itertools import product
 from sage.misc.lazy_attribute import lazy_attribute
 load("bfs.pyx")
 
@@ -92,7 +92,7 @@ class CayleyGroupRetract():
         # Conduct a depth-first search.
         iden = self.identity
         neighbors = lambda M, act=self.action, gens=self.gens: ((act(g, M), g) for g in gens)
-        d = dict(zip(self._S, repeat(None)))
+        d = dict.fromkeys(self._S)
         for v in self._S:
             if d[v] is None:
                 d[v] = (v, self.identity, 0)
@@ -159,11 +159,9 @@ class CayleyGroupRetract():
         while True:
             # Produce random stabilizer elements until we hit the right order.
             rgen *= random.choice(gens)
+            g = rgen*g1
             e2 = self.action(rgen, e1)
             mats2, g2, _ = d[e2]
-            g = rgen*g1
-            if g == g2: # Don't waste time with the identity element
-                continue
             assert mats1 == mats0 and mats2 == mats0
             h = g0*~g2*g*g0inv
             Gh = libgap(h)
@@ -357,12 +355,12 @@ class OrbitLookupTree():
         vertices = [S[M] for M in self.residual_vertices(mats, sub)]
 
         if order == 1:
-            sub['data']['gpel'] = dict(zip(vertices, repeat(None)))
+            sub['data']['gpel'] = dict.fromkeys(vertices)
         else:
             action = lambda g, x, act=self.action, lift=self.lift, data=sub['data']: lift(act(g, x), data)
             retract = CayleyGroupRetract(self.G, vertices, action, self.optimized_rep, gens=gens, order=order)
             sub['data']['retract'] = retract
-            sub['data']['gpel'] = dict(zip(retract.reps(), repeat(None)))
+            sub['data']['gpel'] = dict.fromkeys(retract.reps())
 
     def predicted_count(self, n):
         """
