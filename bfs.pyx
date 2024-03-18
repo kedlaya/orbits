@@ -26,7 +26,7 @@ def bfs(neighbors, list given_keys, iden):
     for v in given_keys:
         if d[v] is not None:
             continue
-        d[v] = (v, iden)
+        d[v] = (None, iden)
         count = 0
         queue = [v]
         while True:
@@ -38,9 +38,9 @@ def bfs(neighbors, list given_keys, iden):
             for (x, g) in neighbors(w):
                 y = d.get(x, None)
                 if y is None:
-                    d[x] = (v, g*d[w][1], None)
+                    d[x] = (None, g*d[w][1], None)
                     queue.append(x)
-        d[v] = (v, iden, count)
+        d[v] = (None, iden, count)
     return d
     
 
