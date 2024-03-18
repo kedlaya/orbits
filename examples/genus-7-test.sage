@@ -76,10 +76,9 @@ if use_forbid:
         ans = {}
         for m in M:
             l = [sum(ops[j]*m[i,j] for j in range(10)) for i in range(5)]
-            l2 = [N.right_kernel() for N in l]
-            K = l2[0]
-            for V in l2:
-                K = K.intersection(V)
+            foo = Matrix(itertools.chain.from_iterable(N.rows() for N in l))
+            K = foo.right_kernel()
+            assert K.dimension() == 1
             v = K.gens()[0]
             ans[m] = as_immutable(v)
         return ans
