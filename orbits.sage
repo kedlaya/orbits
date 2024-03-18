@@ -118,7 +118,7 @@ class CayleyGroupRetract():
         Return an iterator over connected component representatives.
         """
         for v, t in self.items():
-            if t[1] == self.identity:
+            if t[0] == self.identity:
                 yield v
 
     def stabilizer(self, v, gap=False):
@@ -131,9 +131,9 @@ class CayleyGroupRetract():
         d = self.d
 
         # Use the orbit-stabilizer formula to compute the stabilizer order.
-        _, g0, _ = self[v]
+        g0, _ = self[v]
         mats0 = v if g0 == self.identity else self.action(~g0, v)
-        orbit_len = self[mats0][-1]
+        _, orbit_len = self[mats0]
 
         # Early abort for the trivial orbit.
         gens = self.gens
@@ -151,13 +151,13 @@ class CayleyGroupRetract():
         target_order = libgap(self.G_order // orbit_len)
         rgen = self.seed
         e1 = self.action(rgen, v)
-        _, g1, _ = d[e1]
+        g1, _ = d[e1]
         while True:
             # Produce random stabilizer elements until we hit the right order.
             rgen *= random.choice(gens)
             g = rgen*g1
             e2 = self.action(rgen, e1)
-            _, g2, _ = d[e2]
+            g2, _ = d[e2]
             h = g0*~g2*g*g0inv
             Gh = libgap(h)
             if Gh not in H: # Don't waste time if h is redundant
@@ -296,7 +296,7 @@ class OrbitLookupTree():
             if parent['stab'][0] == 1: # Trivial stabilizer, no retract stored
                 g1 = self.identity
             else:
-                _, g1, _ = parent['retract'][y]
+                g1, _ = parent['retract'][y]
             z = y if g1 == self.identity else self.lift(self.action(~g1, y), parent)
             if not find_node: # Abridged operation
                 mats1 = mats0 + (z,)
