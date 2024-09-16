@@ -85,7 +85,10 @@ class CayleyGroupRetract():
 
         if check_closure:
             vertex_set = set(S)
-            assert all(action(g, v) in vertex_set for g in self.gens for v in vertex_set)
+            try:
+                assert all(action(g, v) in vertex_set for g in self.gens for v in vertex_set)
+            except AssertionError:
+                raise AssertionError("Closure not verified")
 
     @lazy_attribute
     def d(self):
@@ -120,6 +123,24 @@ class CayleyGroupRetract():
         for v, t in self.items():
             if t[0] == self.identity:
                 yield v
+
+    def rep(self, v):
+        """
+        Identify the chosen representative for the order containing a given element.
+        """
+        g0, _ = self[v]
+        return (v if g0 == self.identity else self.action(~g0, v))
+
+    def stab_order(self, v):
+        """
+        Compute the order of a point stabilizer.
+        """
+        # Force computation of the retract.
+        _ = self.d
+
+        # Use the orbit-stabilizer formula to compute the stabilizer order.
+        _, orbit_len = self[self.rep(v)]
+        return self.G_order // orbit_len
 
     def stabilizer(self, v, gap=False):
         """
