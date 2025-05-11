@@ -61,7 +61,8 @@ out = {}
 for h in pairs:
     print(h)
     for (f, _) in pairs[h]:
-        lpoly = HyperellipticCurve(f,h).zeta_function().numerator()(T)
+#        lpoly = HyperellipticCurve(f,h).zeta_function().numerator()(T)
+        lpoly = Q(list(magma.HyperellipticCurve(f,h).LPolynomial().Coefficients()))
         if lpoly not in out:
             out[lpoly] = []
         out[lpoly].append((f,h))
