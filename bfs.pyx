@@ -7,6 +7,11 @@ def as_immutable(vec):
     vec.set_immutable()
     return vec
 
+def first_nonzero(v):
+    for i in v:
+        if i:
+            return i
+
 def sumprod(gen1, gen2):
     c = None
     for a, b in zip(gen1, gen2):
@@ -16,22 +21,22 @@ def sumprod(gen1, gen2):
             c = a*b if c is None else c+a*b
     return as_immutable(c)
 
-def bfs(neighbors, list given_keys, iden):
+def bfs(neighbors, given_keys, iden):
     """
-    Perform a breadth-first search of a directed graph (specified by ``neighbors``).
+    Perform a depth-first search of a directed graph (specified by ``neighbors``).
     """
-    cdef dict d = dict.fromkeys(given_keys)
+    cdef dict d = {}
     cdef long count
     cdef list queue
     for v in given_keys:
-        if d[v] is not None:
+        if v in d:
             continue
         d[v] = (iden, None)
         count = 0
         queue = [v]
         while True:
             try:
-                w = queue[count]
+                w = queue.pop()
             except IndexError:
                 break
             count += 1

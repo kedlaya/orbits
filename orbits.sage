@@ -1,5 +1,5 @@
 import random
-from itertools import product
+from itertools import product, tee
 from sage.misc.lazy_attribute import lazy_attribute
 load("bfs.pyx")
 
@@ -200,7 +200,7 @@ class OrbitLookupTree():
     - ``retract`` (for nontrivial stabilizer): a dictionary whose value at `y \in S \setminus U` is an element `g \in G_U` such that `U \cup \{g^{-1}(y)\}` is an orbit representative for `G_U`.    
     """
 
-    def __init__(self, G, vertices, methods=None):
+    def __init__(self, G, vertices, methods=None, check_closure=True):
         r"""
         The entries of ``methods`` (all optional):
  
@@ -226,8 +226,9 @@ class OrbitLookupTree():
         self.depth = 0
 
         self.G_gens = [self.optimized_rep(g) for g in random_generating_sequence(G)]
-        for g in self.G_gens:
-            assert all(self.action(g, x) in self.S for x in self.S)
+        if check_closure:
+            for g in self.G_gens:
+                assert all(self.action(g, x) in self.S for x in self.S)
         self.tree = {'data': {'stab': (self.G_order, self.G_gens)}}
         
     def initialize_vertices(self):
@@ -368,7 +369,7 @@ class OrbitLookupTree():
         """
         order, gens = self.stabilizer(mats, sub)
         S = self.S
-        vertices = [S[M] for M in self.residual_vertices(mats, sub)]
+        vertices = (S[M] for M in self.residual_vertices(mats, sub))
 
         if order == 1:
             sub['data']['gpel'] = dict.fromkeys(vertices)
@@ -464,11 +465,10 @@ class LinearOrbitLookupTree(OrbitLookupTree):
     Class for linear orbit lookup trees.
     """
     def initialize_vertices(self):
-        S = [as_immutable(v) for v in self.V]
-        self.S = dict(zip(S, S))
-        self.full = self.V.ambient_vector_space() is self.V
+        S = (as_immutable(v) for v in self.V if first_nonzero(v) == 1)
+        self.S = dict(zip(*tee(S, 2)))
+        self.full = (self.V.ambient_vector_space() is self.V)
         if self.full:
-            self.full = True
             self.coords = lambda x: x
         else:
             self.coords = lambda x, V=self.V: V.coordinate_vector(x)
@@ -486,23 +486,32 @@ class LinearOrbitLookupTree(OrbitLookupTree):
         lifts = [quot.lift(v) for v in quot.basis()]
         d = quot.dimension()
         F = self.V.base_field()
-        return (sumprod(t, lifts) for t in product(F, repeat=d) if any(t))
+        q = F.cardinality()
+        return (sumprod(t, lifts) for t in product(F, repeat=d) if first_nonzero(t) == 1)
 
     def lift(self, x, data):
         if self.full:
-            return as_immutable(data['section_on_basis']*x)
-        return sumprod(self.coords(x), data['section_on_basis'])
+            c = first_nonzero(x)
+            tmp = data['section_on_basis']*x
+            return as_immutable(tmp if c == 1 else tmp / c)
+        coords = self.coords(x)
+        c = first_nonzero(coords)
+        tmp = sumprod(self.coords(x), data['section_on_basis'])
+        return tmp if c == 1 else tmp / c
 
     def predicted_count(self, n):
         dim = self.V.dimension()
-        return prod(2**(dim-i)-1 for i in range(n)) // prod(2**(n-i)-1 for i in range(n))
+        F = self.V.base_field()
+        q = F.cardinality()
+        return prod(q**(dim-i)-1 for i in range(n)) // prod(q**(n-i)-1 for i in range(n))
 
     def apply_transporter(self, M, mats):
         return tuple(sumprod(i, mats) for i in M.rows())
 
     def transporters(self, n):
         cache = []
-        W = VectorSpace(GF(2), n)
+        F = self.V.base_field()
+        W = VectorSpace(F, n)
         for w in W:
             if not w[:n-1]:
                 continue
