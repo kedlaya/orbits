@@ -473,6 +473,8 @@ class LinearOrbitLookupTree(OrbitLookupTree):
         else:
             self.coords = lambda x, V=self.V: V.coordinate_vector(x)
         self.V_basis = self.V.basis()
+        self.F = self.V.base_field()
+        self.q = self.F.cardinality()
 
     def residual_vertices(self, mats, sub=None):
         quot = self.V.quotient(self.V.subspace(mats))
@@ -485,19 +487,16 @@ class LinearOrbitLookupTree(OrbitLookupTree):
             sub['data']['section_on_basis'] = section_on_basis
         lifts = [quot.lift(v) for v in quot.basis()]
         d = quot.dimension()
-        F = self.V.base_field()
-        q = F.cardinality()
-        return (sumprod(t, lifts) for t in product(F, repeat=d) if first_nonzero(t) == 1)
+        return (as_immutable(sumprod(t, lifts)) for t in product(self.F, repeat=d) if first_nonzero(t) == 1)
+
+    def normalize(self, x):
+        ans = x if self.q == 2 else x / first_nonzero(x)
+        return as_immutable(ans)
 
     def lift(self, x, data):
         if self.full:
-            c = first_nonzero(x)
-            tmp = data['section_on_basis']*x
-            return as_immutable(tmp if c == 1 else tmp / c)
-        coords = self.coords(x)
-        c = first_nonzero(coords)
-        tmp = sumprod(self.coords(x), data['section_on_basis'])
-        return tmp if c == 1 else tmp / c
+            return self.normalize(data['section_on_basis']*x)
+        return self.normalize(sumprod(self.coords(x), data['section_on_basis']))
 
     def predicted_count(self, n):
         dim = self.V.dimension()
@@ -506,7 +505,7 @@ class LinearOrbitLookupTree(OrbitLookupTree):
         return prod(q**(dim-i)-1 for i in range(n)) // prod(q**(n-i)-1 for i in range(n))
 
     def apply_transporter(self, M, mats):
-        return tuple(sumprod(i, mats) for i in M.rows())
+        return tuple(self.normalize(sumprod(i, mats)) for i in M.rows())
 
     def transporters(self, n):
         cache = []
